@@ -4,7 +4,7 @@
 | Champ | Valeur |
 |---|---|
 | **Projet** | AURIGA — Autonomous Quant Research & Investment Agent |
-| **Version du document** | 0.1 (Brouillon) |
+| **Version du document** | 0.2 (Brouillon) |
 | **Date** | 02/09/2026 |
 | **Statut** | Brouillon |
 | **Auteur** | Jovanny (produit avec l'assistance d'Hermes Agent) |
@@ -29,6 +29,28 @@
 ## 1.1 But du document
 
 Ce document spécifie les exigences fonctionnelles, techniques, de performance et non fonctionnelles du système **AURIGA** : un agent autonome de recherche quantitative et de trading qui découvre des stratégies de trading exploitables à partir de données de marché, les valide statistiquement, les déploie sur un compte paper-trading Alpaca (avec options définies-risque), et produit un narratif quotidien explicable de ses décisions.
+
+## 1.1-bis Décisions de cadrage validées (v0.2)
+
+Les décisions structurantes suivantes ont été validées avec le commanditaire et sont opposables pour l'implémentation :
+
+| # | Sujet | Décision |
+|---|---|---|
+| D1 | Nom du produit | AURIGA |
+| D2 | Rôle du LLM | Hybride : le LLM PROPOSE (hypothèses, narratif), le moteur déterministe DISPOSE (validation statistique + risk gates avant toute décision) |
+| D3 | Moteur de recherche | XGBoost (arbres → règles) + Programmation Génétique STGP (search_engine), admission commune BH/FDR + holdout + walk-forward |
+| D4 | Exécution | Compte paper-trading Alpaca ($100k), options définis-risque (spreads) obligatoires (règles hackathon) |
+| D5 | Stratégie options | Spreads définis-risque uniquement (bull/bear call spread, put/call credit spread) ; expiration 2-6 semaines |
+| D6 | Dashboard | Streamlit (web, 1 fichier Python) |
+| D7 | Univers d'actifs | 25 large caps liquides avec options : Tech 9 (AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, AMD, AVGO), Finances 3 (JPM, V, MA), Énergie/Industrie 4 (XOM, CVX, CAT, GE), Conso/Santé 6 (WMT, COST, KO, PEP, JNJ, UNH), ETF 3 (SPY, QQQ, IWM) |
+| D8 | Historique de données | 5 ans (2021-2026), feed Alpaca IEX (gratuit) — daily + intraday |
+| D9 | Timeframes | 1H principal (découverte/backtest) + 1D comme filtre de validation croisée anti-bruit IEX |
+| D10 | Intégration des repos existants | COPIE des modules nécessaires (einherjar/research, midasV3 features) dans AURIGA ; le code du hackathon est strictement dans AURIGA, les repos einherjar/midas restent privés |
+| D11 | Features midasV3 | EXTRACTION ciblée des fonctions de calcul pures (RSI, MACD, volatilité, Hurst, entropies, DFA...) dans un module AURIGA/features/ léger, sans le code superflu (Dask, chunks) |
+| D12 | LLM provider | OpenRouter (clés déjà disponibles), modèle texte type deepseek/gpt-4o-mini pour le narratif |
+| D13 | Scheduler | Lancement manuel du cycle + mode watch quotidien pour le hackathon (pas de cron complexe) |
+| D14 | Environnement | Venv dédié AURIGA/.venv (numpy, polars, numba, xgboost, alpaca-py, streamlit) |
+| D15 | Git | Travail sur main, commits réguliers (même workflow qu'einherjar) |
 
 **Audiences cibles** :
 - Équipe de développement (Jovanny + Hermes Agent)
@@ -63,7 +85,7 @@ Le système AURIGA ne doit PAS :
 
 | Version | Périmètre | Cible |
 |---|---|---|
-| V1 (MVP hackathon) | Research → backtest → exécution paper + options → dashboard → narratif | 4 septembre 2026 (deadline hackathon) |
+| V1 (MVP hackathon) | Research (XGBoost+STGP) → backtest → exécution paper + options (spreads) → dashboard Streamlit → narratif. Univers 25 large caps, 5 ans, TF 1H+1D | 4 septembre 2026 (deadline hackathon) |
 | V2 | Univers élargi, plus de familles de features, optimisation du portefeuille, mode live | Post-hackathon |
 | V3 | Multi-compte, gestion de risque avancée, backtest de bout en bout en production | Long terme |
 
