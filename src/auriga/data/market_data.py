@@ -1,116 +1,270 @@
-"""AURIGA - Client de données de marché Alpaca (réel).
+"""AURIGA - Récupération de données de marché Alpaca (définitif).
 
-Utilise le SDK officiel alpaca-py quand les clés API sont disponibles,
-sinon fallback sur MockMarketDataClient (mode dev/hackathon sans crédits).
+Deux usages, une seule interface :
+1. HISTORIQUE : bars 1H/1D depuis 2021 pour l'entraînement/backtest.
+2. INFÉRENCE : les dernières barres au moment présent (pour décider de trader).
 
-Clés via variables d'environnement (ALPACA_API_KEY / ALPACA_SECRET_KEY),
-chargées par src/auriga/utils/config.py. JAMAIS en dur dans le code.
+Utilise le SDK officiel alpaca-py. Clés via variables d'environnement
+(ALPACA_API_KEY / ALPACA_SECRET_KEY) — jamais en dur dans le code.
+
+API:
+    data_client = get_market_data_client()
+    df = data_client.get_historical_bars("AAPL", "1H", start=..., end=...)
+    df = data_client.get_recent_bars("AAPL", "1H", n=300)
+    chain = data_client.get_option_chain("AAPL", min_dte=14, max_dte=42)
+
+Toutes les fonctions retournent des polars.DataFrame avec la colonne
+`timestamp` en datetime UTC.
 """
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
+import numpy as np
 import polars as pl
+from alpaca.data.enums import DataFeed
+from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
+from alpaca.data.requests import (
+    OptionChainRequest,
+    StockBarsRequest,
+)
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
+from auriga.data.cache import (
+    has_cached_bars,
+    load_cached_bars,
+    save_cached_bars,
+    save_cached_chain,
+)
 from auriga.utils.config import get_config
 
-try:  # import protégé : le SDK peut ne pas être installé
-    from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockBarsRequest
-    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+logger = logging.getLogger(__name__)
 
-    ALPACA_SDK_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    ALPACA_SDK_AVAILABLE = False
-    StockHistoricalDataClient = None  # type: ignore
-    StockBarsRequest = None  # type: ignore
-    TimeFrame = None  # type: ignore
-    TimeFrameUnit = None  # type: ignore
+BAR_COLUMNS = ["timestamp", "open", "high", "low", "close", "volume"]
 
-from auriga.data.mock_data import MockMarketDataClient
+
+def _tf(tf: str) -> TimeFrame:
+    if tf == "1H":
+        return TimeFrame(1, TimeFrameUnit.Hour)
+    if tf == "1D":
+        return TimeFrame(1, TimeFrameUnit.Day)
+    raise ValueError(f"timeframe non supporté: {tf}")
 
 
 class MarketDataClient:
-    """Client de données : bars 1H/1D + chaînes d'options Alpaca.
+    """Client unique pour les données de marché Alpaca (stock + options)."""
 
-    Sélection automatique :
-    - réelles si clés API présentes ET mode non-mock ;
-    - mock sinon.
-    """
-
-    def __init__(self, use_mock: bool | None = None):
+    def __init__(self, api_key: str | None = None, secret_key: str | None = None, feed: str | None = None):
         cfg = get_config()
-        if use_mock is None:
-            use_mock = cfg.orchestration.get("mock_api", True) or not cfg.has_alpaca_credentials
-        self.use_mock = use_mock
-        self._mock = MockMarketDataClient()
-        self._client: StockHistoricalDataClient | None = None
-
-        if not use_mock and ALPACA_SDK_AVAILABLE and cfg.has_alpaca_credentials:
-            self._client = StockHistoricalDataClient(
-                cfg.alpaca_api_key, cfg.alpaca_secret_key
+        self.api_key = api_key or cfg.alpaca_api_key
+        self.secret_key = secret_key or cfg.alpaca_secret_key
+        if not self.api_key or not self.secret_key:
+            raise RuntimeError(
+                "Clés API Alpaca manquantes. Renseignez ALPACA_API_KEY et "
+                "ALPACA_SECRET_KEY dans .env (paper trading)."
             )
+        self.feed = feed or cfg.raw.get("data", {}).get("feed", "iex")
+        self._stock_client = StockHistoricalDataClient(self.api_key, self.secret_key)
+        self._option_client = OptionHistoricalDataClient(self.api_key, self.secret_key)
+        logger.info(
+            "MarketDataClient initialisé (feed=%s, options=%s)",
+            self.feed, "réel",
+        )
 
     # ------------------------------------------------------------------
-    @property
-    def is_mock(self) -> bool:
-        return self.use_mock or self._client is None
-
+    # Bars (historique)
     # ------------------------------------------------------------------
-    def get_bars(
+    def get_historical_bars(
         self,
         symbol: str,
         timeframe: str = "1H",
         start: datetime | None = None,
         end: datetime | None = None,
+        use_cache: bool = True,
     ) -> pl.DataFrame:
-        """Retourne les bars [timestamp, open, high, low, close, volume]."""
-        if self.is_mock:
-            return self._mock.get_bars(symbol, timeframe, start, end)
+        """Bars historiques complètes (défaut : 5 ans jusqu'à aujourd'hui).
 
-        # --- Réel ---
+        Avec cache parquet : le 2e appel est instantané.
+        """
         if start is None:
-            start = datetime.now(timezone.utc) - timedelta(days=5 * 365)
+            years = get_config().research.get("history_years", 5)
+            start = datetime.now(timezone.utc) - timedelta(days=365 * years)
         if end is None:
             end = datetime.now(timezone.utc)
 
-        tf = (
-            TimeFrame(1, TimeFrameUnit.Hour)
-            if timeframe == "1H"
-            else TimeFrame(1, TimeFrameUnit.Day)
-        )
+        if use_cache and has_cached_bars(symbol, timeframe):
+            cached = load_cached_bars(symbol, timeframe)
+            if cached is not None and cached.height > 0:
+                return cached
+
         req = StockBarsRequest(
             symbol_or_symbols=symbol,
-            timeframe=tf,
+            timeframe=_tf(timeframe),
             start=start,
             end=end,
-            adjustment="all",  # splits/dividendes ajustés
+            adjustment="all",
+            feed=self.feed,
         )
-        bars = self._client.get_stock_bars(req)
-        df = bars.df.reset_index()
-        return pl.from_pandas(df)
+        bars = self._stock_client.get_stock_bars(req)
+        if bars.df.empty:
+            logger.warning("Aucune barre pour %s %s [%s, %s]", symbol, timeframe, start, end)
+            return pl.DataFrame(schema={c: pl.Float64 for c in BAR_COLUMNS[1:]})
+        df = self._to_pl(bars.df.reset_index())
 
+        if use_cache:
+            save_cached_bars(df, symbol, timeframe)
+        return df
+
+    # ------------------------------------------------------------------
+    # Bars (inférence temps réel)
+    # ------------------------------------------------------------------
+    def get_recent_bars(self, symbol: str, timeframe: str = "1H", n: int = 500) -> pl.DataFrame:
+        """Les n dernières barres (pour évaluer les signaux à l'instant T)."""
+        end = datetime.now(timezone.utc)
+        if timeframe == "1H":
+            start = end - timedelta(hours=n * 2)  # marge pour les jours sans trading
+        else:
+            start = end - timedelta(days=n * 2)
+        req = StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=_tf(timeframe),
+            start=start,
+            end=end,
+            adjustment="all",
+            feed=self.feed,
+        )
+        bars = self._stock_client.get_stock_bars(req)
+        if bars.df.empty:
+            return pl.DataFrame(schema={c: pl.Float64 for c in BAR_COLUMNS[1:]})
+        df = self._to_pl(bars.df.reset_index())
+        return df.tail(n)
+
+    # ------------------------------------------------------------------
+    # Chaîne d'options
     # ------------------------------------------------------------------
     def get_option_chain(
         self,
         symbol: str,
-        expiry_start: datetime | None = None,
-        expiry_end: datetime | None = None,
+        min_dte: int | None = None,
+        max_dte: int | None = None,
+        use_cache: bool = True,
     ) -> pl.DataFrame:
-        """Chaîne d'options (calls/puts, strikes, expirations).
+        """Chaîne d'options complète (calls + puts, toutes expirations).
 
-        Note : les données d'options historiques ne sont pas disponibles
-        gratuitement — ceci renvoie la chaîne MOCK par défaut (le backtest
-        des spreads utilise le pricing Black-Scholes, pas des prix historiques).
+        Retourne les colonnes : symbol, option_symbol, type, strike, expiry,
+        bid, ask, last, open_interest, volume, implied_vol (si dispo).
         """
-        return self._mock.get_option_chain(symbol, expiry_start, expiry_end)
+        cfg_opts = get_config().options
+        min_dte = min_dte or cfg_opts.get("min_dte", 14)
+        max_dte = max_dte or cfg_opts.get("max_dte", 42)
+
+        from auriga.data.cache import has_cached_chain, load_cached_chain
+
+        if use_cache and has_cached_chain(symbol):
+            cached = load_cached_chain(symbol)
+            if cached is not None and cached.height > 0:
+                return cached
+
+        # 1. Chaîne de contrats d'options pour le symbole (OptionChainRequest)
+        today = datetime.now(timezone.utc).date()
+        chain_req = OptionChainRequest(
+            underlying_symbol=symbol,
+            expiration_date_gte=(today + timedelta(days=min_dte)).isoformat(),
+            expiration_date_lte=(today + timedelta(days=max_dte)).isoformat(),
+        )
+        contracts = self._option_client.get_option_chain(chain_req)
+        if not contracts:
+            logger.warning("Aucune chaîne d'options pour %s [%dd-%dd]", symbol, min_dte, max_dte)
+            return pl.DataFrame()
+
+        # contracts est un dict {option_symbol: snapshot}
+        rows: list[dict[str, Any]] = []
+        for occ, snap in contracts.items():
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "option_symbol": occ,
+                    "type": "call" if "C" in occ.split(symbol)[1][:1] and "P" not in occ.split(symbol)[1][:1] else "put",
+                    "strike": float(getattr(snap, "underlying_asset", None).strike_price)
+                    if getattr(snap, "underlying_asset", None) is not None
+                    else 0.0,
+                    "expiry": str(getattr(snap, "underlying_asset", None).expiration_date)
+                    if getattr(snap, "underlying_asset", None) is not None
+                    else "",
+                    "multiplier": int(getattr(getattr(snap, "underlying_asset", None), "multiplier", 100)),
+                    "bid": float(getattr(getattr(snap, "latest_quote", None), "bid_price", 0.0) or 0.0),
+                    "ask": float(getattr(getattr(snap, "latest_quote", None), "ask_price", 0.0) or 0.0),
+                    "last": float(getattr(getattr(snap, "latest_trade", None), "price", 0.0) or 0.0),
+                    "open_interest": int(getattr(snap, "open_interest", 0) or 0),
+                    "volume": int(getattr(snap, "volume", 0) or 0),
+                    "implied_vol": float(getattr(snap, "implied_volatility", 0.0) or 0.0),
+                }
+            )
+
+        df = pl.DataFrame(rows)
+        if use_cache and df.height > 0:
+            save_cached_chain(df, symbol)
+        return df
 
     # ------------------------------------------------------------------
-    def get_spot_price(self, symbol: str) -> float:
-        bars = self.get_bars(symbol, "1D")
-        return float(bars["close"][-1])
+    def _to_pl(self, df: Any) -> pl.DataFrame:
+        """Convertit le DataFrame alpaca-py (pandas multi-index) en polars."""
+        # df a un index (timestamp, symbol) après reset_index
+        df = df.rename(columns={"index": "timestamp"}) if "index" in df.columns else df
+        if "timestamp" not in df.columns and "t" in df.columns:
+            df = df.rename(columns={"t": "timestamp"})
+        out = pl.from_pandas(df)
+        if "symbol" in out.columns:
+            out = out.drop("symbol")
+        out = out.rename({c: c.lower() for c in out.columns if c.lower() in {"open", "high", "low", "close", "volume"}})
+        if "timestamp" not in out.columns:
+            raise ValueError(f"Colonne timestamp absente: {out.columns}")
+        return out.select(
+            [c for c in BAR_COLUMNS if c in out.columns]
+        )
 
 
-def make_data_client(use_mock: bool | None = None) -> MarketDataClient:
-    """Factory : retourne le bon client selon la config."""
-    return MarketDataClient(use_mock=use_mock)
+# ---------------------------------------------------------------------------
+# Factory / helpers
+# ---------------------------------------------------------------------------
+
+_client: MarketDataClient | None = None
+
+
+def get_market_data_client() -> MarketDataClient:
+    """Singleton du client de données."""
+    global _client
+    if _client is None:
+        _client = MarketDataClient()
+    return _client
+
+
+def download_universe(
+    symbols: list[str], timeframe: str = "1H", use_cache: bool = True
+) -> dict[str, pl.DataFrame]:
+    """Télécharge les bars pour tout l'univers. Retourne {symbol: DataFrame}."""
+    client = get_market_data_client()
+    out: dict[str, pl.DataFrame] = {}
+    for sym in symbols:
+        try:
+            out[sym] = client.get_historical_bars(sym, timeframe, use_cache=use_cache)
+            logger.info("  %s: %d barres", sym, out[sym].height)
+        except Exception as e:
+            logger.error("  %s: échec (%s)", sym, e)
+    return out
+
+
+def download_option_chains(symbols: list[str]) -> dict[str, pl.DataFrame]:
+    """Télécharge les chaînes d'options pour tout l'univers."""
+    client = get_market_data_client()
+    out: dict[str, pl.DataFrame] = {}
+    for sym in symbols:
+        try:
+            out[sym] = client.get_option_chain(sym)
+            logger.info("  %s: %d contrats", sym, out[sym].height)
+        except Exception as e:
+            logger.error("  %s: échec (%s)", sym, e)
+    return out

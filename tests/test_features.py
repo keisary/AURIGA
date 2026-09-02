@@ -15,14 +15,33 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from auriga.data.mock_data import MockMarketDataClient
 from auriga.features.engine import FEATURE_NAMES, compute_features
+
+
+def _ohlcv(n: int = 3000, seed: int = 0) -> pl.DataFrame:
+    """Données OHLCV synthétiques déterministes (sans mock)."""
+    rng = np.random.default_rng(seed)
+    close = np.cumsum(rng.normal(0.0002, 0.01, n)) + 100.0
+    open_ = np.concatenate([[close[0]], close[:-1]])
+    high = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.003, n)))
+    low = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, 0.003, n)))
+    volume = rng.integers(1_000_000, 30_000_000, n)
+    return pl.DataFrame(
+        {
+            "timestamp": list(range(n)),
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        }
+    )
 
 
 def test_engine_produces_all_columns():
     """Le DataFrame de sortie doit contenir toutes les colonnes du registre."""
-    mock = MockMarketDataClient()
-    ohlcv = mock.get_bars("AAPL", "1H").head(3000)
+    
+    ohlcv = _ohlcv(3000)
     df = compute_features(ohlcv, "1H")
     assert df.height == ohlcv.height
     assert "timestamp" in df.columns
@@ -32,8 +51,8 @@ def test_engine_produces_all_columns():
 
 def test_engine_no_inf():
     """Aucune valeur infinie dans les features."""
-    mock = MockMarketDataClient()
-    ohlcv = mock.get_bars("AAPL", "1H").head(2000)
+    
+    ohlcv = _ohlcv(2000)
     df = compute_features(ohlcv, "1H")
     for name in FEATURE_NAMES:
         arr = df[name].to_numpy()
@@ -41,15 +60,15 @@ def test_engine_no_inf():
 
 
 def test_engine_same_rows_as_input():
-    mock = MockMarketDataClient()
-    ohlcv = mock.get_bars("AAPL", "1H").head(500)
+    
+    ohlcv = _ohlcv(500)
     df = compute_features(ohlcv, "1H")
     assert df.height == ohlcv.height
 
 
 def test_engine_timeframe_1d():
-    mock = MockMarketDataClient()
-    ohlcv = mock.get_bars("AAPL", "1D").head(800)
+    
+    ohlcv = _ohlcv(800)
     df = compute_features(ohlcv, "1D")
     assert df.height == ohlcv.height
     assert len(df.columns) == len(FEATURE_NAMES) + 1  # + timestamp
