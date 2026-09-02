@@ -87,20 +87,29 @@ def _safe(arr: np.ndarray) -> np.ndarray:
 
 def _check_available() -> list[str]:
     """Retourne les fonctions manquantes (pas encore collées depuis midas)."""
+    needed = [
+        ("t", "_numba_ema_vectorized"), ("t", "_numba_sma_vectorized"),
+        ("t", "_numba_rsi_vectorized"), ("t", "_numba_macd_complete"),
+        ("t", "_numba_bollinger_bands"), ("t", "_numba_atr"),
+        ("t", "_numba_momentum"), ("t", "_numba_roc"), ("t", "_numba_vwap"),
+        ("t", "_numba_adx_complete"), ("t", "_numba_obv"), ("t", "_numba_mfi"),
+        ("t", "_numba_aroon"), ("t", "_numba_choppiness_index"),
+        ("t", "_numba_vortex"),
+        ("q", "_numba_realized_volatility"), ("q", "_numba_garch_volatility"),
+        ("q", "_numba_hurst_rs"), ("q", "_numba_autocorrelation"),
+        ("q", "_numba_shannon_entropy"), ("q", "_numba_dfa"),
+        ("q", "_numba_rolling_skewness"), ("q", "_numba_rolling_kurtosis"),
+        ("q", "_numba_dynamic_var"), ("q", "_numba_dynamic_cvar"),
+        ("q", "_numba_max_drawdown"), ("q", "_numba_regime_detection"),
+        ("q", "_numba_amihud_illiquidity"), ("q", "_numba_kaufman_efficiency"),
+        ("q", "_numba_variance_ratio"), ("q", "calculate_price_position_numba"),
+        ("q", "calculate_market_regime_numba"),
+    ]
     missing = []
-    for fn_name in [
-        "rsi", "macd", "bollinger", "atr", "momentum", "roc", "vwap",
-        "adx", "obv", "mfi", "aroon", "choppiness", "vortex",
-        "realized_vol", "garch_vol", "hurst", "autocorrelation",
-        "shannon_entropy", "dfa", "skewness", "kurtosis", "var", "cvar",
-        "max_drawdown", "regime_detection", "amihud", "kaufman",
-        "variance_ratio", "price_position", "market_regime",
-        "volatility_clustering", "volatility_persistence",
-        "fractal_dimension", "dominant_frequency", "spectral_centroid",
-        "kyles_lambda",
-    ]:
-        if not hasattr(t, fn_name) and not hasattr(q, fn_name):
-            missing.append(fn_name)
+    for mod, fn in needed:
+        obj = t if mod == "t" else q
+        if not hasattr(obj, fn):
+            missing.append(f"{mod}.{fn}")
     return missing
 
 
