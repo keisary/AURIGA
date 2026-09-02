@@ -17,11 +17,17 @@ from __future__ import annotations
 import numpy as np
 
 try:
-    from numba import njit, prange
+    from numba import jit, njit, prange
 
     NUMBA_AVAILABLE = True
 except ImportError:  # pragma: no cover
     NUMBA_AVAILABLE = False
+
+    def jit(*args, **kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
 
     def njit(*args, **kwargs):
         def decorator(func):
@@ -389,3 +395,282 @@ def calculate_market_regime_numba(returns, volatility, window=50):
         regime[i] = regime[window - 1]
 
     return regime
+
+@jit(nopython=True, cache=True)
+def _numba_garch_volatility(returns, alpha=0.1, beta=0.8):
+    """GARCH(1,1) volatility ultra-rapide"""
+    N = len(returns)
+    if N < 2:
+        return np.array([0.1], dtype=OPTIMAL_FLOAT)
+
+    # Initialisation
+    omega = 0.01 * (1 - alpha - beta)  # Long-term variance
+    volatility = np.zeros(N, dtype=OPTIMAL_FLOAT)
+    volatility[0] = np.std(returns)
+
+    # GARCH recursion
+    for t in range(1, N):
+        volatility[t] = np.sqrt(
+            omega + alpha * returns[t - 1] ** 2 + beta * volatility[t - 1] ** 2
+        )
+
+    return volatility
+    
+@jit(nopython=True, cache=True)
+def _numba_autocorrelation(prices, max_lag=20, window=252):
+    """
+    Autocorrélation ROLLING ultra-rapide (NO DATA LEAKAGE).
+
+    CORRECTION: Version précédente calculait UN SEUL scalaire pour tout le dataset.
+    Cette version calcule l'autocorrélation sur rolling window.
+
+    Args:
+        prices: Array de prix
+        max_lag: Décalage pour l'autocorrélation
+        window: Taille fenêtre rolling (défaut 252)
+
+    Returns:
+        Array de même taille que prices
+    """
+    n = len(prices)
+    result = np.zeros(n, dtype=OPTIMAL_FLOAT)
+
+    for i in range(window, n):
+        window_prices = prices[i - window : i]
+        N = len(window_prices)
+
+        if N < max_lag + 1:
+            continue
+
+        mean_price = np.mean(window_prices)
+        centered = window_prices - mean_price
+
+        variance = np.sum(centered**2) / N
+        if variance == 0:
+            continue
+
+        covariance = 0.0
+        for j in range(N - max_lag):
+            covariance += centered[j] * centered[j + max_lag]
+
+        covariance /= N - max_lag
+        result[i] = covariance / variance
+
+    return result
+
+
+@jit(nopython=True, cache=True)
+def _numba_shannon_entropy(prices, bins=50, window=252):
+    """
+    Entropie de Shannon ROLLING (NO DATA LEAKAGE).
+    
+    CORRECTION: Version précédente calculait UNE entropie pour tout le dataset.
+    Cette version calcule entropy sur rolling window.
+    
+    Args:
+        prices: Array de prix
+        bins: Nombre de bins pour histogramme
+        window: Taille fenêtre rolling (défaut 252)
+    
+    Returns:
+        Array d'entropies (même taille que prices)
+    """
+    n = len(prices)
+    entropy_array = np.zeros(n, dtype=OPTIMAL_FLOAT)
+    
+    for i in range(window, n):
+        # Lookback window
+        window_prices = prices[i - window : i]
+        
+        if len(window_prices) < 2:
+            continue
+        
+        # Normaliser les prix
+        min_val = np.min(window_prices)
+        max_val = np.max(window_prices)
+        if max_val == min_val:
+            continue
+        
+        # Créer les bins
+        bin_width = (max_val - min_val) / bins
+        hist = np.zeros(bins, dtype=OPTIMAL_FLOAT)
+        
+        # Compter les occurrences
+        for price in window_prices:
+            bin_idx = int((price - min_val) / bin_width)
+            if bin_idx >= bins:
+                bin_idx = bins - 1
+            hist[bin_idx] += 1
+        
+        # Calculer l'entropie
+        total = len(window_prices)
+        entropy = 0.0
+        for count in hist:
+            if count > 0:
+                p = count / total
+                entropy -= p * np.log2(p)
+        
+        entropy_array[i] = entropy
+    
+    return entropy_array
+
+@jit(nopython=True, cache=True)
+def _numba_dfa(prices, window=252):
+    """
+    Detrended Fluctuation Analysis ROLLING (NO DATA LEAKAGE).
+
+    CORRECTION: Version précédente retournait UN SEUL scalaire pour tout
+    le dataset. Cette version calcule le DFA sur une rolling window.
+
+    Args:
+        prices: Array de prix
+        window: Taille fenêtre rolling (défaut 252)
+
+    Returns:
+        Array de DFA exponents (même taille que prices)
+    """
+    n = len(prices)
+    dfa_array = np.full(n, 0.5, dtype=OPTIMAL_FLOAT)  # Défaut: random walk
+
+    for idx in range(window, n):
+        win = prices[idx - window : idx]
+        N = len(win)
+        if N < 20:
+            continue
+
+        # Profile (cumsum déviations par rapport à la moyenne)
+        mean_price = np.mean(win)
+        integrated = np.cumsum(win - mean_price)
+
+        # 3 scales pour performance (simplifié vs 5 scales original)
+        scales = np.array([10, 25, min(50, N // 4)], dtype=np.int32)
+        fluctuations = np.zeros(len(scales), dtype=OPTIMAL_FLOAT)
+
+        for scale_idx, scale in enumerate(scales):
+            if scale >= N or scale < 4:
+                continue
+
+            n_segments = N // scale
+            mse = 0.0
+
+            for j in range(n_segments):
+                start_idx = j * scale
+                end_idx = start_idx + scale
+                segment = integrated[start_idx:end_idx]
+
+                x = np.arange(scale, dtype=OPTIMAL_FLOAT)
+                sum_x = np.sum(x)
+                sum_y = np.sum(segment)
+                sum_xy = np.sum(x * segment)
+                sum_x2 = np.sum(x * x)
+
+                denom = scale * sum_x2 - sum_x * sum_x
+                if abs(denom) > 1e-10:
+                    slope = (scale * sum_xy - sum_x * sum_y) / denom
+                    intercept = (sum_y - slope * sum_x) / scale
+                    for k in range(scale):
+                        trend = slope * k + intercept
+                        mse += (segment[k] - trend) ** 2
+
+            if n_segments > 0:
+                fluctuations[scale_idx] = np.sqrt(mse / (n_segments * scale))
+
+        # Log-log regression → DFA exponent
+        valid_scales = scales[scales < N]
+        valid_fluct = fluctuations[:len(valid_scales)]
+
+        if len(valid_scales) >= 2 and np.min(valid_fluct) > 0:
+            log_scales = np.log(valid_scales.astype(OPTIMAL_FLOAT))
+            log_fluct = np.log(valid_fluct + 1e-10)
+
+            n_pts = len(log_scales)
+            sum_x = np.sum(log_scales)
+            sum_y = np.sum(log_fluct)
+            sum_xy = np.sum(log_scales * log_fluct)
+            sum_x2 = np.sum(log_scales * log_scales)
+
+            denom = n_pts * sum_x2 - sum_x * sum_x
+            if abs(denom) > 1e-10:
+                dfa_exp = (n_pts * sum_xy - sum_x * sum_y) / denom
+                dfa_array[idx] = max(0.0, min(2.0, dfa_exp))
+
+    return dfa_array
+
+@jit(nopython=True, cache=True)
+def _numba_amihud_illiquidity(returns, volume, window=20):
+    """Amihud Illiquidity ultra-rapide"""
+    n = len(returns)
+    if n < window:
+        return np.full(n, 0.0, dtype=OPTIMAL_FLOAT)
+        
+    illiquidity = np.zeros(n, dtype=OPTIMAL_FLOAT)
+    
+    # Amihud = Mean( |Return| / (Price * Volume) )
+    # Simplification pour compatibilité dimensionnelle: |Return| / Volume
+    # Car Price * Volume = Dollar Volume, mais ici on veut l'impact par unité de volume
+    
+    abs_returns = np.abs(returns)
+    
+    for i in range(window - 1, n):
+        window_ret = abs_returns[i - window + 1 : i + 1]
+        window_vol = volume[i - window + 1 : i + 1]
+        
+        sum_ratio = 0.0
+        count = 0
+        
+        for j in range(window):
+            if window_vol[j] > 1e-5:
+                sum_ratio += window_ret[j] / window_vol[j]
+                count += 1
+                
+        if count > 0:
+            illiquidity[i] = sum_ratio / count * 1e6  # Mettre à l'échelle
+        else:
+            illiquidity[i] = 0.0
+            
+    # Remplir
+    for i in range(window - 1):
+        illiquidity[i] = illiquidity[window - 1]
+        
+    return illiquidity
+
+@jit(nopython=True, cache=True)
+def _numba_variance_ratio(returns, lags=20):
+    """Test de Ratio de Variance (Random Walk) ultra-rapide"""
+    n = len(returns)
+    if n < lags * 2:
+        return np.full(n, 1.0, dtype=OPTIMAL_FLOAT)
+        
+    vr = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)  # NaN pour ffill correct en post-processing
+    
+    # VR(q) = Var(r_q) / (q * Var(r_1))
+    # Var(r_q) est la variance des rendements sur q périodes
+    
+    for i in range(n - 1, 30, -1): # Ne pas calculer pour tout l'historique (trop lent), focus récent
+        # Fenêtre locale pour "Rolling VR"
+        window_size = min(i, 100)
+        if window_size < lags: 
+            continue
+            
+        local_rets = returns[i - window_size + 1 : i + 1]
+        
+        # Variance 1-période
+        var_1 = np.var(local_rets)
+        
+        # Variance q-périodes
+        # Somme mobile des rendements sur lags
+        sum_rets_q = np.zeros(len(local_rets) - lags + 1)
+        for j in range(len(sum_rets_q)):
+            sum_rets_q[j] = np.sum(local_rets[j : j + lags])
+            
+        var_q = np.var(sum_rets_q)
+        
+        if var_1 > 1e-10:
+            vr[i] = var_q / (lags * var_1)
+        else:
+            vr[i] = 1.0
+            
+    # Remplir les trous (forward fill inversé ou simple fill)
+    # Numba ne supporte pas ffill simple, on laisse les 0 qui seront ffill plus tard par pandas
+    
+    return vr

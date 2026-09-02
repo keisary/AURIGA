@@ -16,11 +16,17 @@ from __future__ import annotations
 import numpy as np
 
 try:
-    from numba import njit, prange
+    from numba import jit, njit, prange
 
     NUMBA_AVAILABLE = True
 except ImportError:  # pragma: no cover
     NUMBA_AVAILABLE = False
+
+    def jit(*args, **kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
 
     def njit(*args, **kwargs):
         def decorator(func):
@@ -319,3 +325,181 @@ def _numba_adx_complete(high, low, close, period=14):
                     adx[i] = (adx[i - 1] * (period - 1) + dx_values[i]) / period
 
     return adx, di_plus, di_minus
+
+@njit(nopython=True, cache=True)
+def _numba_momentum(prices, period=10):
+    """Momentum ultra-rapide"""
+    n = len(prices)
+    result = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)
+
+    for i in range(period, n):
+        result[i] = prices[i] - prices[i - period]
+
+    return result
+
+
+@njit(nopython=True, cache=True)
+def _numba_roc(prices, period=12):
+    """Rate of Change ultra-rapide"""
+    n = len(prices)
+    result = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)
+
+    for i in range(period, n):
+        if prices[i - period] != 0:
+            result[i] = 100.0 * (prices[i] - prices[i - period]) / prices[i - period]
+        else:
+            result[i] = 0.0
+
+    return result
+
+
+@njit(nopython=True, cache=True)
+def _numba_vwap(prices, volumes):
+    """VWAP ultra-rapide"""
+    n = len(prices)
+    result = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)
+
+    cum_pv = 0.0
+    cum_vol = 0.0
+
+    for i in range(n):
+        if not np.isnan(volumes[i]) and volumes[i] > 0:
+            cum_pv += prices[i] * volumes[i]
+            cum_vol += volumes[i]
+
+            if cum_vol > 0:
+                result[i] = cum_pv / cum_vol
+
+    return result
+
+@njit(nopython=True, cache=True)
+def _numba_obv(prices, volumes):
+    """On Balance Volume ultra-rapide"""
+    n = len(prices)
+    obv = np.full(n, 0.0, dtype=OPTIMAL_FLOAT)
+
+    if n > 0:
+        obv[0] = volumes[0]
+
+        for i in range(1, n):
+            if prices[i] > prices[i - 1]:
+                obv[i] = obv[i - 1] + volumes[i]
+            elif prices[i] < prices[i - 1]:
+                obv[i] = obv[i - 1] - volumes[i]
+            else:
+                obv[i] = obv[i - 1]
+
+    return obv
+
+@njit(nopython=True, cache=True)
+def _numba_mfi(high, low, close, volume, period=14):
+    """Calcule le Money Flow Index ultra-rapide avec Numba."""
+    n = len(close)
+    result = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)
+    
+    tp = (high + low + close) / 3.0
+    
+    pos_mf = np.zeros(n, dtype=OPTIMAL_FLOAT)
+    neg_mf = np.zeros(n, dtype=OPTIMAL_FLOAT)
+    
+    for i in range(1, n):
+        if tp[i] > tp[i-1]:
+            pos_mf[i] = tp[i] * volume[i]
+        elif tp[i] < tp[i-1]:
+            neg_mf[i] = tp[i] * volume[i]
+            
+    for i in range(period, n):
+        sum_pos_mf = np.sum(pos_mf[i - period + 1 : i + 1])
+        sum_neg_mf = np.sum(neg_mf[i - period + 1 : i + 1])
+        
+        if sum_neg_mf != 0:
+            mf_ratio = sum_pos_mf / sum_neg_mf
+            result[i] = 100.0 - (100.0 / (1.0 + mf_ratio))
+        else:
+            result[i] = 100.0
+            
+    return result
+
+@njit(nopython=True, cache=True)
+def _numba_aroon(high, low, period=14):
+    """Calcule Aroon Up et Aroon Down ultra-rapide avec Numba."""
+    n = len(high)
+    aroon_up = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)
+    aroon_down = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)
+    
+    for i in range(period, n):
+        window_high = high[i - period : i + 1]
+        window_low = low[i - period : i + 1]
+        
+        # Jours depuis le plus haut / plus bas (fenêtre de period+1 éléments)
+        days_since_high = period - np.argmax(window_high)
+        days_since_low = period - np.argmin(window_low)
+        
+        aroon_up[i] = 100.0 * (period - days_since_high) / period
+        aroon_down[i] = 100.0 * (period - days_since_low) / period
+        
+    return aroon_up, aroon_down
+
+@njit(nopython=True, cache=True)
+def _numba_choppiness_index(high, low, close, period=14):
+    """Calcule le Choppiness Index ultra-rapide avec Numba"""
+    n = len(high)
+    chop = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)
+    
+    # ATR components (True Range only)
+    tr = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)
+    tr[0] = high[0] - low[0]
+    for i in range(1, n):
+        tr1 = high[i] - low[i]
+        tr2 = abs(high[i] - close[i - 1])
+        tr3 = abs(low[i] - close[i - 1])
+        tr[i] = max(tr1, tr2, tr3)
+        
+    for i in range(period, n):
+        sum_tr = np.sum(tr[i - period + 1 : i + 1])
+        max_high = np.max(high[i - period + 1 : i + 1])
+        min_low = np.min(low[i - period + 1 : i + 1])
+        
+        range_diff = max_high - min_low
+        if range_diff != 0 and sum_tr != 0:
+            # CHOP = 100 * LOG10( SUM(TR,14) / (MAX(Hi,14) - MIN(Lo,14)) ) / LOG10(14)
+            chop[i] = 100.0 * np.log10(sum_tr / range_diff) / np.log10(period)
+        else:
+            chop[i] = 0.0 # Fallback
+            
+    return chop
+
+@njit(nopython=True, cache=True)
+def _numba_vortex(high, low, close, period=14):
+    """Calcule le Vortex Indicator (VI+ et VI-) ultra-rapide avec Numba"""
+    n = len(high)
+    vip = np.full(n, np.nan, dtype=OPTIMAL_FLOAT) # VI+
+    vim = np.full(n, np.nan, dtype=OPTIMAL_FLOAT) # VI-
+    
+    # Pre-calculate movements
+    vm_plus = np.zeros(n, dtype=OPTIMAL_FLOAT)
+    vm_minus = np.zeros(n, dtype=OPTIMAL_FLOAT)
+    tr = np.zeros(n, dtype=OPTIMAL_FLOAT)
+    
+    for i in range(1, n):
+        # VM+ = Abs(Current High - Previous Low)
+        vm_plus[i] = abs(high[i] - low[i-1])
+        # VM- = Abs(Current Low - Previous High)
+        vm_minus[i] = abs(low[i] - high[i-1])
+        
+        # TR
+        tr1 = high[i] - low[i]
+        tr2 = abs(high[i] - close[i - 1])
+        tr3 = abs(low[i] - close[i - 1])
+        tr[i] = max(tr1, tr2, tr3)
+        
+    for i in range(period, n):
+        sum_vm_plus = np.sum(vm_plus[i - period + 1 : i + 1])
+        sum_vm_minus = np.sum(vm_minus[i - period + 1 : i + 1])
+        sum_tr = np.sum(tr[i - period + 1 : i + 1])
+        
+        if sum_tr != 0:
+            vip[i] = sum_vm_plus / sum_tr
+            vim[i] = sum_vm_minus / sum_tr
+            
+    return vip, vim
