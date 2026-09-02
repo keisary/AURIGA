@@ -1,0 +1,37 @@
+# Secrets - JAMAIS committer
+.env
+*.key
+*.pem
+
+# Environnements virtuels
+.venv/
+venv/
+
+# Données et outputs
+data/raw/
+data/processed/
+data/options/
+outputs/corpus/
+outputs/archive/
+outputs/narratives/
+outputs/logs/
+*.jsonl
+!config/*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store

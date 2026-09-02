@@ -1,0 +1,95 @@
+# ============================================================
+# AURIGA - Configuration centrale
+# ============================================================
+
+# --- Horizon de recherche ---
+research:
+  timeframes: ["1H", "1D"]
+  primary_timeframe: "1H"      # D9 : 1H principal (découverte/backtest)
+  validation_timeframe: "1D"   # D9 : 1D pour validation croisée anti-bruit
+  history_years: 5             # D8 : 2021-2026
+  horizons_hours: [6, 24, 48]  # horizons de trading en barres 1H
+  train_ratio: 0.6
+  val_ratio: 0.2
+  holdout_ratio: 0.2
+  embargo_bars: 24             # embargo entre val et holdout
+
+# --- Admission statistique (REQ-F-VAL) ---
+admission:
+  min_sharpe: 2.0
+  min_win_rate: 0.65
+  min_profit_factor: 1.5
+  min_trades: 30
+  max_drawdown: 0.30
+  min_holdout_trades: 15
+  fdr_adaptive: true           # BH/FDR adapté au volume de barres
+  walk_forward_folds: 5        # validation walk-forward
+  walk_forward_min_folds_pct: 0.60
+
+# --- Découverte (XGBoost + STGP) ---
+discovery:
+  xgboost:
+    enabled: true
+    n_estimators: 200
+    max_depth: 4
+    learning_rate: 0.05
+    n_jobs: 1
+    max_paths: 200
+  stgp:
+    enabled: true
+    population: 200
+    generations: 50
+    max_depth: 4
+
+# --- Sélection de portefeuille (REQ-F-SEL) ---
+selection:
+  max_positions: 12            # D10 : max positions simultanées
+  max_per_asset: 1
+  min_signal_strength: 0.55
+  diversify: true              # MMR / anti-corrélation
+
+# --- Options (REQ-F-OPT) ---
+options:
+  min_dte: 14                  # expiration 2-6 semaines (D5)
+  max_dte: 42
+  min_delta_abs: 0.20          # strikes avec delta raisonnable
+  max_delta_abs: 0.45
+  min_open_interest: 100
+  max_bid_ask_spread_pct: 0.30 # spread bid-ask max (fraction du prix)
+  risk_per_trade_pct: 0.02     # risque max par position (2% du capital)
+  max_spread_width_pct: 0.20   # largeur max du spread (fraction du sous-jacent)
+
+# --- Risk engine (REQ-F-RSK) ---
+risk:
+  daily_loss_limit: 0.02       # -2% du compte → stop des nouveaux ordres
+  max_asset_exposure: 0.10     # 10% max par actif
+  max_sector_exposure: 0.25    # 25% max par secteur
+  max_total_exposure: 0.80     # 80% max du capital investi
+  max_positions: 12
+  stop_loss_pct: 0.15          # stop global
+  liquidation_threshold: 0.25  # -25% → liquidation des positions
+
+# --- Narratif LLM (REQ-F-NAR) ---
+narrative:
+  enabled: true
+  provider: "openrouter"
+  model: "deepseek/deepseek-chat"
+  max_tokens: 1500
+  temperature: 0.4
+
+# --- Orchestration (REQ-F-ORC) ---
+orchestration:
+  cycle_frequency: "daily"     # quotidien pour le hackathon
+  max_candidates_per_cycle: 1000
+  log_level: "INFO"
+  mock_api: true               # mock si pas de clés API (dev)
+
+# --- Persistance ---
+storage:
+  corpus: "outputs/corpus/corpus.jsonl"
+  archive: "outputs/archive/archive.jsonl"
+  narratives: "outputs/narratives/"
+  logs: "outputs/logs/"
+  raw_data: "data/raw/"
+  processed_data: "data/processed/"
+  options_cache: "data/options/"

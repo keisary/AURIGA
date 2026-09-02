@@ -1,0 +1,79 @@
+# ============================================================
+# AURIGA - Univers d'actifs (décision D7 du cahier des charges)
+# 25 large caps liquides avec options, couvrant 5 secteurs
+# ============================================================
+
+universe:
+  # --- Technologie (9) ---
+  tech:
+    - AAPL
+    - MSFT
+    - NVDA
+    - AMZN
+    - GOOGL
+    - META
+    - TSLA
+    - AMD
+    - AVGO
+  # --- Finance (3) ---
+  financials:
+    - JPM
+    - V
+    - MA
+  # --- Énergie / Industrie (4) ---
+  energy_industrials:
+    - XOM
+    - CVX
+    - CAT
+    - GE
+  # --- Consommation / Santé (6) ---
+  consumer_health:
+    - WMT
+    - COST
+    - KO
+    - PEP
+    - JNJ
+    - UNH
+  # --- ETF (3) ---
+  etf:
+    - SPY
+    - QQQ
+    - IWM
+
+# Univers plat (tous les symboles, pour l'API)
+symbols:
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - GOOGL
+  - META
+  - TSLA
+  - AMD
+  - AVGO
+  - JPM
+  - V
+  - MA
+  - XOM
+  - CVX
+  - CAT
+  - GE
+  - WMT
+  - COST
+  - KO
+  - PEP
+  - JNJ
+  - UNH
+  - SPY
+  - QQQ
+  - IWM
+
+# Secteurs par symbole (pour le risk engine - exposure sectorielle)
+sectors:
+  technology: [AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, AMD, AVGO]
+  financials: [JPM, V, MA]
+  energy: [XOM, CVX]
+  industrials: [CAT, GE]
+  consumer: [WMT, COST, KO, PEP]
+  health: [JNJ, UNH]
+  etf: [SPY, QQQ, IWM]
