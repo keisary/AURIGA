@@ -635,6 +635,31 @@ def _numba_amihud_illiquidity(returns, volume, window=20):
     return illiquidity
 
 @jit(nopython=True, cache=True)
+def calculate_price_position_numba(prices, window=20):
+    """Position du prix dans la range ultra-rapide"""
+    n = len(prices)
+    if n < window:
+        return np.full(n, 0.5, dtype=OPTIMAL_FLOAT)
+
+    position = np.zeros(n, dtype=OPTIMAL_FLOAT)
+
+    for i in range(window - 1, n):
+        window_data = prices[i - window + 1 : i + 1]
+        min_val = np.min(window_data)
+        max_val = np.max(window_data)
+
+        if max_val != min_val:
+            position[i] = (prices[i] - min_val) / (max_val - min_val)
+        else:
+            position[i] = 0.5
+
+    # Remplir les premières valeurs
+    for i in range(window - 1):
+        position[i] = position[window - 1]
+
+    return position
+
+@jit(nopython=True, cache=True)
 def _numba_variance_ratio(returns, lags=20):
     """Test de Ratio de Variance (Random Walk) ultra-rapide"""
     n = len(returns)
