@@ -38,7 +38,9 @@ class XGBConfig:
     """Hyperparamètres XGBoost pour AURIGA (1H, large caps)."""
 
     n_estimators: int = 200
-    max_depth: int = 4
+    max_depth: int = 3  # calibré 2026-09-02 (test AAPL): depth=4 -> regles trop
+    # restrictives (25 trades moy), depth=2 -> trop simples (0 admis).
+    # depth=3 = sweet spot (40 trades moy, admis possibles).
     learning_rate: float = 0.05
     subsample: float = 0.8
     colsample_bytree: float = 0.6
