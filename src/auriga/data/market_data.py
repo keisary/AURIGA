@@ -180,21 +180,23 @@ class MarketDataClient:
             logger.warning("Aucune chaîne d'options pour %s [%dd-%dd]", symbol, min_dte, max_dte)
             return pl.DataFrame()
 
-        # contracts est un dict {option_symbol: snapshot}
+        # contracts est un dict {option_symbol: snapshot}. Les snapshots ne
+        # portent PAS strike/expiry (ils sont dans le symbole OCC) → parser.
+        from auriga.options.occ import parse_occ
+
         rows: list[dict[str, Any]] = []
         for occ, snap in contracts.items():
+            parsed = parse_occ(occ)
+            if parsed is None:
+                continue
             rows.append(
                 {
                     "symbol": symbol,
                     "option_symbol": occ,
-                    "type": "call" if "C" in occ.split(symbol)[1][:1] and "P" not in occ.split(symbol)[1][:1] else "put",
-                    "strike": float(getattr(snap, "underlying_asset", None).strike_price)
-                    if getattr(snap, "underlying_asset", None) is not None
-                    else 0.0,
-                    "expiry": str(getattr(snap, "underlying_asset", None).expiration_date)
-                    if getattr(snap, "underlying_asset", None) is not None
-                    else "",
-                    "multiplier": int(getattr(getattr(snap, "underlying_asset", None), "multiplier", 100)),
+                    "type": parsed["type"],
+                    "strike": parsed["strike"],
+                    "expiry": parsed["expiry"],
+                    "multiplier": 100,
                     "bid": float(getattr(getattr(snap, "latest_quote", None), "bid_price", 0.0) or 0.0),
                     "ask": float(getattr(getattr(snap, "latest_quote", None), "ask_price", 0.0) or 0.0),
                     "last": float(getattr(getattr(snap, "latest_trade", None), "price", 0.0) or 0.0),
