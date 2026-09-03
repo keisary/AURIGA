@@ -3,10 +3,13 @@
 Affiche : état du compte (P&L réel Alpaca), positions suivies, constellation
 des stratégies actives, risk gates, narratif quotidien.
 
-Charte : « Le Cocher céleste » (styles.py).
+Charte : « Le Cocher céleste » (styles.py) — identité concentrée dans le
+logo, le reste du dashboard est un terminal quant institutionnel (strip de
+métriques, tableaux, liste de gates compacte).
 
 Lancement :  streamlit run src/auriga/dashboard/app.py
 """
+
 from __future__ import annotations
 
 import json
@@ -23,11 +26,8 @@ if str(_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_ROOT / "src"))
 
 
-
 from auriga.dashboard import styles
 from auriga.orchestration.state import StateStore
-from auriga.selection.scoring import score_breakdown
-from auriga.utils.universe import load_universe
 
 st.set_page_config(
     page_title="AURIGA — Autonomous Quant Research Agent",
@@ -40,8 +40,15 @@ st.set_page_config(
 # Chargement des données
 # ---------------------------------------------------------------------------
 
+
 def load_account() -> dict:
-    """État du compte Alpaca (ou valeurs par défaut si indisponible)."""
+    """État RÉEL du compte Alpaca paper.
+
+    En cas d'échec de connexion → aucun chiffre fabriqué : les champs passent
+    à None et l'UI affiche des « — » + un bandeau « ALPACA DISCONNECTED »
+    explicite. Un faux $100,000 présenté comme réel serait trompeur pour le
+    jury (revue 2026-09-03, P1 dashboard).
+    """
     from dotenv import load_dotenv
 
     load_dotenv(_ROOT / ".env")
@@ -60,12 +67,15 @@ def load_account() -> dict:
             "live": True,
         }
     except Exception as e:
-        # MODE DÉMO explicite — les valeurs sont des placeholders VISIBLES,
-        # jamais présentées comme un vrai compte connecté.
         return {
-            "equity": None, "cash": None, "buying_power": None,
-            "day_pnl": None, "total_pnl": None, "n_positions": 0,
-            "live": False, "error": str(e),
+            "equity": None,
+            "cash": None,
+            "buying_power": None,
+            "day_pnl": None,
+            "total_pnl": None,
+            "n_positions": 0,
+            "live": False,
+            "error": str(e),
         }
 
 
@@ -118,7 +128,6 @@ def load_risk_state() -> dict:
 # ---------------------------------------------------------------------------
 
 st.markdown(styles.CSS, unsafe_allow_html=True)
-st.markdown(styles.stars_background(70), unsafe_allow_html=True)
 st.markdown('<div class="auriga-sky">', unsafe_allow_html=True)
 
 account = load_account()
@@ -126,152 +135,140 @@ portfolio = load_portfolio()
 narrative = load_narrative()
 risk_state = load_risk_state()
 
-# ----- Header -----
-status_text = "PAPER CONNECTED" if account.get("live") else "MODE DÉMO"
-st.markdown(styles.header_html(status_text), unsafe_allow_html=True)
-
-# Bandeau de connexion explicite (CONNECTED / DISCONNECTED)
-if account.get("live"):
+# ----- Header + état de connexion -----
+is_live = bool(account.get("live"))
+st.markdown(styles.header_html(is_live), unsafe_allow_html=True)
+if not is_live:
+    # Bandeau d'avertissement visible : on ne laisse JAMAIS croire qu'un
+    # compte réel est connecté quand la connexion Alpaca a échoué.
     st.markdown(
-        "<div style='background:rgba(46,230,168,0.08);border:1px solid rgba(46,230,168,0.3);"
-        "border-radius:8px;padding:8px 14px;margin-bottom:12px;font-family:JetBrains Mono,monospace;"
-        "font-size:0.8rem;color:#2EE6A8'>● ALPACA PAPER TRADING — CONNECTED</div>",
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown(
-        f"<div style='background:rgba(255,92,122,0.1);border:1px solid rgba(255,92,122,0.4);"
-        f"border-radius:8px;padding:8px 14px;margin-bottom:12px;font-family:JetBrains Mono,monospace;"
-        f"font-size:0.8rem;color:#FF5C7A'>⚠ ALPACA DISCONNECTED — AFFICHAGE DÉMO (aucune donnée réelle)"
-        f"{' · ' + str(account.get('error'))[:80] if account.get('error') else ''}</div>",
+        styles.connection_banner_html(False, str(account.get("error") or "")),
         unsafe_allow_html=True,
     )
 
-# ----- KPI Row -----
-equity = account["equity"]
-day_pnl = account.get("day_pnl")
-total_pnl = account.get("total_pnl")
-
-if equity is None:
-    # Mode démo : pas de fausses valeurs
-    k1 = styles.kpi_html("EQUITY", "—", "non connecté", "gold")
-    k2 = styles.kpi_html("P&L JOUR", "—", "non connecté")
-    k3 = styles.kpi_html("P&L TOTAL", "—", "non connecté")
+# ----- Metrics strip (equity en hero, P&L jour/total, positions) -----
+if is_live:
+    equity = account["equity"]
+    day_pnl = float(account.get("day_pnl") or 0.0)
+    total_pnl = float(account.get("total_pnl") or 0.0)
+    metrics = [
+        {"label": "Equity", "value": f"${equity:,.0f}", "sub": "capital paper", "hero": True},
+        {
+            "label": "P&L jour",
+            "value": f"{'+' if day_pnl >= 0 else ''}${day_pnl:,.0f}",
+            "sub": "mark-to-market",
+            "cls": "pos" if day_pnl >= 0 else "neg",
+        },
+        {
+            "label": "P&L total",
+            "value": f"{'+' if total_pnl >= 0 else ''}${total_pnl:,.0f}",
+            "sub": "depuis lancement",
+            "cls": "pos" if total_pnl >= 0 else "neg",
+        },
+    ]
 else:
-    k1 = styles.kpi_html("EQUITY", f"${equity:,.0f}", "capital paper", "gold")
-    k2_cls = "pos" if day_pnl >= 0 else "neg"
-    k2_sign = "+" if day_pnl >= 0 else ""
-    k2 = styles.kpi_html("P&L JOUR", f"{k2_sign}${day_pnl:,.0f}", "mark-to-market", k2_cls)
-    k3_cls = "pos" if total_pnl >= 0 else "neg"
-    k3_sign = "+" if total_pnl >= 0 else ""
-    k3 = styles.kpi_html("P&L TOTAL", f"{k3_sign}${total_pnl:,.0f}", "depuis lancement", k3_cls)
-k4 = styles.kpi_html(
-    "POSITIONS",
-    f"{len(risk_state['positions'])}",
-    f"{len(portfolio)} stratégies au portefeuille",
+    # Mode démo honnête : aucune valeur fabriquée, des « — » explicites.
+    metrics = [
+        {"label": "Equity", "value": "—", "sub": "non connecté", "hero": True},
+        {"label": "P&L jour", "value": "—", "sub": "non connecté"},
+        {"label": "P&L total", "value": "—", "sub": "non connecté"},
+    ]
+metrics.append(
+    {
+        "label": "Positions ouvertes",
+        "value": f"{len(risk_state['positions'])}",
+        "sub": f"{len(portfolio)} stratégies au portefeuille",
+    }
 )
+st.markdown(styles.metrics_strip_html(metrics), unsafe_allow_html=True)
 
-cols = st.columns(4)
-for col, kpi in zip(cols, [k1, k2, k3, k4]):
-    with col:
-        st.markdown(kpi, unsafe_allow_html=True)
-
-# ----- Equity & positions -----
+# ----- Équity & constellation -----
 st.markdown(styles.section_html("État du portefeuille"), unsafe_allow_html=True)
 
 col_a, col_b = st.columns([3, 2])
 
 with col_a:
-    st.markdown(
-        "<div class='auriga-card'><div class='dim'>Equity curve — historique à venir "
-        "(le compte paper a démarré à $100,000)</div></div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown(styles.equity_panel_html(is_live), unsafe_allow_html=True)
 
 with col_b:
     st.markdown(styles.section_html("Constellation des stratégies"), unsafe_allow_html=True)
     st.markdown(
-        styles.constellation_svg(portfolio, width=480, height=260),
+        styles.constellation_svg(portfolio, width=440, height=240),
         unsafe_allow_html=True,
     )
 
 # ----- Positions -----
-st.markdown(styles.section_html("Positions actives"), unsafe_allow_html=True)
-if risk_state["positions"]:
-    for p in risk_state["positions"]:
-        st.markdown(
-            styles.position_html(p.symbol, p.direction, p.strategy_name, p.max_risk),
-            unsafe_allow_html=True,
-        )
-else:
-    st.markdown(
-        "<div class='auriga-card dim'>Aucune position ouverte — le système attend "
-        "des signaux validés par le risk engine.</div>",
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    styles.section_html("Positions actives", meta=f"{len(risk_state['positions'])} ouvertes"),
+    unsafe_allow_html=True,
+)
+position_rows = [
+    {
+        "symbol": p.symbol,
+        "direction": p.direction,
+        "strategy": p.strategy_name,
+        "risk": p.max_risk,
+    }
+    for p in risk_state["positions"]
+]
+st.markdown(styles.positions_table_html(position_rows), unsafe_allow_html=True)
 
 # ----- Stratégies (détail) -----
-st.markdown(styles.section_html("Stratégies du portefeuille"), unsafe_allow_html=True)
-if portfolio:
-    cards = []
-    for s in portfolio:
-        cond = s.get("condition_str", "")
-        cards.append(
-            f"<div class='auriga-card' style='margin-bottom:8px'>"
-            f"<span class='mono' style='font-weight:600'>{s['symbol']}</span> "
-            f"<span class='badge {'badge-long' if s['direction']=='LONG' else 'badge-short'}'>{s['direction']}</span> "
-            f"<span class='dim'>score {s.get('score', 0):.2f} · poids {s.get('weight', 0)*100:.0f}%</span>"
-            f"<div class='mono dim' style='margin-top:4px;font-size:0.78rem'>{cond}</div>"
-            f"</div>"
-        )
-    st.markdown("".join(cards), unsafe_allow_html=True)
-else:
-    st.markdown(
-        "<div class='auriga-card dim'>Aucune stratégie — lancer <b>auriga research</b> "
-        "pour découvrir des stratégies.</div>",
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    styles.section_html("Stratégies du portefeuille", meta=f"{len(portfolio)} au total"),
+    unsafe_allow_html=True,
+)
+strategy_rows = [
+    {
+        "symbol": s["symbol"],
+        "direction": s["direction"],
+        "score": s.get("score", 0.0),
+        "weight": s.get("weight", 0.0),
+        "condition": s.get("condition_str", ""),
+    }
+    for s in portfolio
+]
+st.markdown(styles.strategies_table_html(strategy_rows), unsafe_allow_html=True)
 
 # ----- Risk gates & Narratif -----
-st.markdown(styles.section_html("Risk engine & Narratif"), unsafe_allow_html=True)
+st.markdown(styles.section_html("Risk engine & narratif"), unsafe_allow_html=True)
 col_r, col_n = st.columns(2)
 
 with col_r:
     gates = [
-        styles.gate_html("Daily loss limit (-2%)", "ok" if not risk_state["last_blocked"] else "warn"),
-        styles.gate_html("Exposition max / actif (10%)", "ok"),
-        styles.gate_html("Exposition max / secteur (25%)", "ok"),
-        styles.gate_html("Positions max (12)", "ok" if len(risk_state["positions"]) < 12 else "warn"),
-        styles.gate_html("Stop global & liquidation (-25%)", "ok"),
+        {
+            "label": "Perte quotidienne max (-2%)",
+            "status": "ok" if not risk_state["last_blocked"] else "warn",
+        },
+        {"label": "Exposition max / actif (10%)", "status": "ok"},
+        {"label": "Exposition max / secteur (25%)", "status": "ok"},
+        {
+            "label": "Positions max (12)",
+            "status": "ok" if len(risk_state["positions"]) < 12 else "warn",
+        },
+        {"label": "Stop global & liquidation (-25%)", "status": "ok"},
     ]
-    # Derniers blocages
     for b in risk_state["last_blocked"]:
         gates.append(
-            styles.gate_html(f"Blocage {b.get('symbol', '?')}", "block", "; ".join(b.get("reasons", [])))
+            {
+                "label": f"Blocage {b.get('symbol', '?')}",
+                "status": "block",
+                "detail": "; ".join(b.get("reasons", [])),
+            }
         )
-    st.markdown("".join(gates), unsafe_allow_html=True)
+    st.markdown(styles.gates_list_html(gates), unsafe_allow_html=True)
 
 with col_n:
     if narrative:
-        st.markdown(
-            f"<div class='auriga-narrative'>{narrative}</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div class="auriga-narrative">{narrative}</div>', unsafe_allow_html=True)
     else:
         st.markdown(
-            "<div class='auriga-card dim'>Aucun narratif généré — le rapport LLM "
+            '<div class="dim" style="padding:6px 2px">Aucun narratif généré — le rapport LLM '
             "quotidien apparaîtra ici après le premier cycle.</div>",
             unsafe_allow_html=True,
         )
 
 # ----- Footer -----
-st.markdown(
-    "<div style='margin-top:40px;padding-top:14px;border-top:1px solid #1E2A45;"
-    "display:flex;justify-content:space-between;font-size:0.7rem;color:#5A6478'>"
-    "<span>AURIGA — Autonomous Quant Research &amp; Investment Agent</span>"
-    "<span>Paper trading · Options définis-risque · Le LLM propose, le moteur dispose</span>"
-    "</div>",
-    unsafe_allow_html=True,
-)
+st.markdown(styles.footer_html(), unsafe_allow_html=True)
 
 st.markdown("</div>", unsafe_allow_html=True)  # close .auriga-sky

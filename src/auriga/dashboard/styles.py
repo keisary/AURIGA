@@ -1,280 +1,243 @@
 """AURIGA - Charte graphique du dashboard (CSS + helpers).
 
-Thème : « Le Cocher céleste » — ciel nocturne, étoiles, or Capella,
-constellation Auriga. Défini dans la charte graphique validée.
+Thème : « Le Cocher céleste » — l'identité (nom, logo, or Capella) est
+conservée, mais concentrée en un seul point de netteté (le logo dans le
+header). Le reste du dashboard adopte une esthétique de terminal quant
+institutionnel : hairlines, tableaux, une strip de métriques unifiée —
+pensé pour être lu vite et pris au sérieux par un jury technique.
+
+Toutes les couleurs sont définies une seule fois dans COLORS, puis
+injectées comme CSS custom properties (:root) — aucune couleur n'est
+dupliquée en dur dans la feuille de style.
 """
 from __future__ import annotations
 
-import random
+import math
 
 # ---------------------------------------------------------------------------
-# Palette (charte AURIGA)
+# Palette (charte AURIGA — révisée pour un rendu institutionnel)
 # ---------------------------------------------------------------------------
 
 COLORS = {
-    "bg": "#070B14",          # nuit profonde
-    "surface": "#0D1424",     # bleu nuit
-    "surface_hi": "#131C31",  # bleu nuit clair (hover)
-    "border": "#1E2A45",      # ligne stellaire
-    "text": "#E8EDF7",        # blanc étoilé
-    "text_dim": "#8A94AD",    # gris stellaire
-    "gold": "#F5C542",        # or Capella (accent principal)
-    "blue": "#4DA3FF",        # bleu stellaire
-    "green": "#2EE6A8",       # vert aurore (positif)
-    "red": "#FF5C7A",         # rouge nébuleuse (négatif)
-    "orange": "#FF9F43",      # orange supernova (alerte)
+    "bg": "#06080D",          # quasi-noir, base terminal
+    "surface": "#0B0F17",     # panneaux, table de fond
+    "border": "#1B212C",      # hairline structurel
+    "border_soft": "#141922", # séparateurs internes (lignes de tableau)
+    "text": "#E7E9EE",        # texte principal
+    "text_dim": "#8B93A3",    # texte secondaire / labels
+    "text_faint": "#565E6C",  # texte tertiaire / footer
+    "gold": "#C9A24B",        # or Capella, desaturé — accent unique
+    "blue": "#4C7EDB",        # liens de la constellation
+    "green": "#3ED9A4",       # positif (P&L, LONG)
+    "red": "#F0566E",         # négatif (P&L, SHORT, blocage)
+    "orange": "#E7A23D",      # avertissement
 }
 
 # ---------------------------------------------------------------------------
 # CSS complet
 # ---------------------------------------------------------------------------
 
-CSS = """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+def _root_vars() -> str:
+    """Génère le bloc :root à partir de COLORS — source unique de vérité."""
+    mapping = {
+        "--bg": "bg", "--surface": "surface", "--border": "border",
+        "--border-soft": "border_soft", "--text": "text",
+        "--text-dim": "text_dim", "--text-faint": "text_faint",
+        "--gold": "gold", "--blue": "blue", "--green": "green",
+        "--red": "red", "--orange": "orange",
+    }
+    decls = "".join(f"{var}:{COLORS[key]};" for var, key in mapping.items())
+    return f":root{{{decls}}}"
 
-/* ===== Fond général : nuit profonde ===== */
+
+_BASE_CSS = """
+* { box-sizing: border-box; }
+
 .stApp {
-    background: radial-gradient(ellipse at 20% 0%, #0B1224 0%, #070B14 55%);
-    color: #E8EDF7;
-    font-family: 'Inter', sans-serif;
+    background:
+      radial-gradient(700px 420px at 12% -8%, rgba(201,162,75,0.06), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
 }
 
-/* Masquer le header/branding Streamlit par défaut */
-#MainMenu, footer, header[data-testid="stHeader"] {
-    visibility: hidden; height: 0;
-}
-.block-container { padding-top: 1.2rem; }
+#MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
+.block-container { padding-top: 1.4rem; max-width: 1180px; }
 
-/* ===== Ciel étoilé (arrière-plan) ===== */
-.auriga-stars {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background-repeat: repeat;
-}
-.auriga-sky { position: relative; z-index: 1; }
+.auriga-sky { position: relative; }
 
-/* ===== Header branding ===== */
+/* ===== Header ===== */
 .auriga-header {
-    display: flex; align-items: center; gap: 16px;
-    padding: 10px 4px 18px 4px;
-    border-bottom: 1px solid #1E2A45;
-    margin-bottom: 20px;
+    display: flex; align-items: center; gap: 14px;
+    padding: 6px 0 20px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 22px;
 }
-.auriga-logo { width: 46px; height: 46px; flex-shrink: 0; }
+.auriga-logo { width: 34px; height: 34px; flex-shrink: 0; }
 .auriga-title {
     font-family: 'Space Grotesk', sans-serif;
-    font-weight: 700; font-size: 1.7rem; letter-spacing: 2px;
-    color: #E8EDF7; margin: 0;
+    font-weight: 600; font-size: 1.28rem; letter-spacing: 0.3px;
+    color: var(--text); margin: 0; line-height: 1;
 }
-.auriga-title .gold { color: #F5C542; }
-.auriga-subtitle {
-    font-size: 0.78rem; color: #8A94AD; letter-spacing: 3px;
-    text-transform: uppercase; margin: 0;
-}
+.auriga-title .gold { color: var(--gold); }
+.auriga-subtitle { font-size: 0.76rem; color: var(--text-dim); margin: 4px 0 0 0; }
 .auriga-status {
-    margin-left: auto; display: flex; align-items: center; gap: 8px;
-    font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;
-    color: #2EE6A8; background: rgba(46,230,168,0.08);
-    border: 1px solid rgba(46,230,168,0.25);
-    padding: 5px 12px; border-radius: 20px;
+    margin-left: auto; display: flex; align-items: center; gap: 7px;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+    color: var(--text-dim); border: 1px solid var(--border);
+    padding: 5px 11px; border-radius: 4px; letter-spacing: 0.5px;
 }
-.auriga-status .dot {
-    width: 7px; height: 7px; border-radius: 50%; background: #2EE6A8;
-    animation: pulse-dot 2s infinite;
-}
-@keyframes pulse-dot {
-    0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(46,230,168,0.5); }
-    50%     { opacity: 0.6; box-shadow: 0 0 0 5px rgba(46,230,168,0); }
-}
+.auriga-status.live { color: var(--green); }
+.auriga-status.off { color: var(--red); border-color: rgba(240,86,110,0.45); }
+.auriga-status .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.auriga-status.live .dot, .auriga-status.off .dot { animation: pulse-dot 2s infinite; }
+@keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
-/* ===== KPI cards ===== */
-.auriga-kpi {
-    background: linear-gradient(160deg, #0D1424 0%, #0A101F 100%);
-    border: 1px solid #1E2A45; border-radius: 12px;
-    padding: 16px 18px; position: relative; overflow: hidden;
+/* ===== Metrics strip (remplace le kit de 4 cartes KPI identiques) ===== */
+.auriga-metrics {
+    display: flex; border: 1px solid var(--border); border-radius: 6px;
+    overflow: hidden; margin-bottom: 26px; background: var(--surface);
 }
-.auriga-kpi::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: linear-gradient(90deg, transparent, #F5C54255, transparent);
-}
-.auriga-kpi-label {
-    font-size: 0.7rem; color: #8A94AD; letter-spacing: 1.5px;
-    text-transform: uppercase; margin-bottom: 6px;
-}
-.auriga-kpi-value {
+.auriga-metric { flex: 1; padding: 14px 20px; border-right: 1px solid var(--border); }
+.auriga-metric:last-child { border-right: none; }
+.auriga-metric-label { font-size: 0.74rem; color: var(--text-dim); margin-bottom: 6px; }
+.auriga-metric-value {
     font-family: 'JetBrains Mono', monospace; font-weight: 600;
-    font-size: 1.55rem; color: #E8EDF7; line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    font-size: 1.5rem; color: var(--text); line-height: 1.1;
 }
-.auriga-kpi-value.pos { color: #2EE6A8; }
-.auriga-kpi-value.neg { color: #FF5C7A; }
-.auriga-kpi-value.gold { color: #F5C542; }
-.auriga-kpi-sub { font-size: 0.72rem; color: #8A94AD; margin-top: 5px; }
+.auriga-metric.hero .auriga-metric-value { font-size: 1.9rem; color: var(--gold); }
+.auriga-metric-value.pos { color: var(--green); }
+.auriga-metric-value.neg { color: var(--red); }
+.auriga-metric-sub { font-size: 0.72rem; color: var(--text-faint); margin-top: 5px; }
 
-/* ===== Section headers ===== */
+/* ===== Sections (plus d'icône décorative répétée) ===== */
 .auriga-section {
+    display: flex; align-items: baseline; justify-content: space-between;
     font-family: 'Space Grotesk', sans-serif;
-    font-weight: 600; font-size: 1.05rem; color: #E8EDF7;
-    letter-spacing: 0.5px; margin: 22px 0 10px 0;
-    display: flex; align-items: center; gap: 10px;
+    font-weight: 600; font-size: 0.98rem; color: var(--text);
+    margin: 28px 0 10px 0; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
 }
-.auriga-section .star { color: #F5C542; font-size: 0.9rem; }
-
-/* ===== Cards génériques ===== */
-.auriga-card {
-    background: #0D1424; border: 1px solid #1E2A45;
-    border-radius: 12px; padding: 16px 18px;
-    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
-}
-.auriga-card:hover {
-    border-color: #F5C54266;
-    box-shadow: 0 0 18px rgba(245,197,66,0.06);
-    transform: translateY(-1px);
+.auriga-section .meta {
+    font-family: 'Inter', sans-serif; font-weight: 400;
+    font-size: 0.76rem; color: var(--text-dim);
 }
 
-/* ===== Positions ===== */
-.auriga-position {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 10px 14px; border-radius: 8px;
-    background: #0A101F; border: 1px solid #1E2A45;
-    margin-bottom: 6px;
+/* ===== Panneaux (equity, états vides) ===== */
+.auriga-panel {
+    border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
+    padding: 18px 20px;
 }
-.auriga-position .sym {
-    font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 0.95rem;
-}
-.auriga-position .dir-long { color: #2EE6A8; }
-.auriga-position .dir-short { color: #FF5C7A; }
-.auriga-position .strat { font-size: 0.75rem; color: #8A94AD; }
-.auriga-position .risk {
-    font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #E8EDF7;
-}
-.badge {
-    font-family: 'JetBrains Mono', monospace; font-size: 0.65rem;
-    padding: 2px 8px; border-radius: 10px; letter-spacing: 0.5px;
-}
-.badge-long { background: rgba(46,230,168,0.12); color: #2EE6A8; border: 1px solid rgba(46,230,168,0.3); }
-.badge-short { background: rgba(255,92,122,0.12); color: #FF5C7A; border: 1px solid rgba(255,92,122,0.3); }
+.auriga-panel.dim-text { color: var(--text-dim); font-size: 0.85rem; }
 
-/* ===== Risk gates ===== */
-.auriga-gate {
-    display: flex; align-items: center; gap: 10px;
-    padding: 7px 12px; border-radius: 8px; margin-bottom: 5px;
-    font-size: 0.82rem;
+/* ===== Tableaux (remplace les cartes répétées pour positions/stratégies) ===== */
+.auriga-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.auriga-table th {
+    text-align: left; font-weight: 500; font-size: 0.72rem; color: var(--text-dim);
+    padding: 0 10px 8px 10px; border-bottom: 1px solid var(--border);
 }
-.auriga-gate.ok { background: rgba(46,230,168,0.05); color: #2EE6A8; }
-.auriga-gate.warn { background: rgba(255,159,67,0.08); color: #FF9F43; }
-.auriga-gate.block { background: rgba(255,92,122,0.08); color: #FF5C7A; animation: gate-pulse 1.5s infinite; }
-@keyframes gate-pulse {
-    0%,100% { opacity: 1; } 50% { opacity: 0.65; }
+.auriga-table th.num { text-align: right; }
+.auriga-table td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); }
+.auriga-table tr:last-child td { border-bottom: none; }
+.auriga-table td.mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+.auriga-table td.num { text-align: right; }
+.auriga-table td.strong { font-weight: 600; }
+.auriga-table td.dim { color: var(--text-dim); }
+.auriga-table .side { font-size: 0.74rem; font-weight: 600; }
+.auriga-table .side.long { color: var(--green); }
+.auriga-table .side.short { color: var(--red); }
+.auriga-table tr.cond-row td {
+    padding-top: 0; padding-bottom: 12px; font-size: 0.76rem; color: var(--text-faint);
 }
-.auriga-gate .glyph { font-weight: 700; }
+
+/* ===== Risk gates (liste compacte, plus de badge par item) ===== */
+.auriga-gates { display: flex; flex-direction: column; gap: 2px; }
+.auriga-gate-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; font-size: 0.82rem; }
+.auriga-gate-row .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.auriga-gate-row.ok .dot { background: var(--green); }
+.auriga-gate-row.warn .dot { background: var(--orange); }
+.auriga-gate-row.block .dot { background: var(--red); animation: pulse-dot 1.4s infinite; }
+.auriga-gate-row .label { color: var(--text); }
+.auriga-gate-row .detail { margin-left: auto; font-size: 0.74rem; color: var(--text-dim); }
 
 /* ===== Narratif ===== */
 .auriga-narrative {
-    background: linear-gradient(165deg, #0D1424, #0A101F);
-    border: 1px solid #1E2A45; border-left: 3px solid #F5C542;
-    border-radius: 12px; padding: 18px 22px;
-    line-height: 1.6; font-size: 0.92rem; color: #C9D2E3;
+    border-left: 2px solid var(--gold);
+    padding: 4px 0 4px 16px; line-height: 1.65; font-size: 0.88rem; color: var(--text);
     max-height: 420px; overflow-y: auto;
 }
-.auriga-narrative h1, .auriga-narrative h2 { color: #F5C542; font-size: 1.1rem; margin-top: 12px; }
-.auriga-narrative strong { color: #E8EDF7; }
-.auriga-narrative li { margin-bottom: 4px; }
+.auriga-narrative h1, .auriga-narrative h2 { color: var(--gold); font-size: 1rem; margin: 14px 0 6px 0; }
+.auriga-narrative strong { color: var(--text); }
 
-/* ===== Scintillement des étoiles ===== */
-@keyframes twinkle {
-    0%,100% { opacity: 0.25; }
-    50% { opacity: 0.9; }
-}
-
-/* ===== Count-up / twinkle card ===== */
-@keyframes card-in {
-    from { opacity: 0; transform: scale(0.96); }
-    to { opacity: 1; transform: scale(1); }
-}
-.auriga-card { animation: card-in 0.4s ease-out; }
-
-/* ===== Constellation SVG container ===== */
+/* ===== Constellation ===== */
 .auriga-constellation {
-    width: 100%; border-radius: 12px;
-    background: radial-gradient(ellipse at center, #0B1224 0%, #070B14 80%);
-    border: 1px solid #1E2A45;
+    width: 100%; border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
 }
 .auriga-constellation svg { width: 100%; height: auto; display: block; }
 
-/* ===== Métriques texte générique ===== */
+/* ===== Utilitaires ===== */
 .mono { font-family: 'JetBrains Mono', monospace; }
-.dim { color: #8A94AD; font-size: 0.8rem; }
+.dim { color: var(--text-dim); font-size: 0.82rem; }
 
-/* Scrollbar */
+/* ===== Footer ===== */
+.auriga-footer {
+    margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-faint);
+}
+
+/* ===== Scrollbar ===== */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #1E2A45; border-radius: 3px; }
-</style>
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ===== Responsive ===== */
+@media (max-width: 700px) {
+    .auriga-metrics { flex-wrap: wrap; }
+    .auriga-metric { flex: 1 1 50%; border-bottom: 1px solid var(--border); }
+}
 """
+
+CSS = (
+    "<style>\n"
+    "@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700"
+    "&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');\n"
+    f"{_root_vars()}\n{_BASE_CSS}\n"
+    "</style>"
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers HTML
 # ---------------------------------------------------------------------------
 
-def stars_background(n_stars: int = 70, seed: int = 42) -> str:
-    """Génère un ciel étoilé en CSS (box-shadows positionnés)."""
-    rng = random.Random(seed)
-    stars = []
-    for _ in range(n_stars):
-        x = rng.randint(0, 100)
-        y = rng.randint(0, 100)
-        size = rng.choice([1, 1, 1, 2, 2, 3])
-        opacity = rng.uniform(0.15, 0.7)
-        tw = "animation: twinkle %ds ease-in-out infinite; animation-delay: %.1fs;" % (
-            rng.randint(3, 8), rng.uniform(0, 4)
-        )
-        stars.append(
-            f"<div style='position:absolute;left:{x}%;top:{y}%;width:{size}px;"
-            f"height:{size}px;border-radius:50%;background:#E8EDF7;opacity:{opacity:.2f};"
-            f"{tw}'></div>"
-        )
-    return f'<div class="auriga-stars">{"".join(stars)}</div>'
-
-
-def logo_svg(size: int = 46) -> str:
-    """Logo : pentagone de la constellation Auriga, Capella en or."""
-    # Points du pentagone (étoile à 5 branches simplifiée - forme Auriga)
-    pts = [
-        (50, 6),    # Capella (sommet, or)
-        (88, 28),
-        (74, 70),
-        (26, 70),
-        (12, 28),
-    ]
+def logo_svg(size: int = 34) -> str:
+    """Logo : constellation Auriga, Capella en or. Seul endroit où le motif
+    céleste apparaît — c'est la marque, pas un fond répété."""
+    pts = [(50, 8), (86, 30), (72, 72), (28, 72), (14, 30)]
     poly = " ".join(f"{x},{y}" for x, y in pts)
+    gold, blue, text = COLORS["gold"], COLORS["blue"], COLORS["text"]
     return f"""
     <svg class="auriga-logo" width="{size}" height="{size}" viewBox="0 0 100 100">
-      <defs>
-        <radialGradient id="capella-glow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stop-color="#F5C542" stop-opacity="0.9"/>
-          <stop offset="100%" stop-color="#F5C542" stop-opacity="0"/>
-        </radialGradient>
-      </defs>
-      <circle cx="50" cy="6" r="22" fill="url(#capella-glow)"/>
-      <!-- lignes de la constellation -->
-      <polygon points="{poly}" fill="none" stroke="#4DA3FF" stroke-width="1.4" stroke-opacity="0.7"
-        stroke-linejoin="round"/>
-      <!-- diagonales internes (étoile) -->
-      <line x1="50" y1="6" x2="74" y2="70" stroke="#4DA3FF" stroke-width="1" stroke-opacity="0.35"/>
-      <line x1="50" y1="6" x2="26" y2="70" stroke="#4DA3FF" stroke-width="1" stroke-opacity="0.35"/>
-      <line x1="12" y1="28" x2="88" y2="28" stroke="#4DA3FF" stroke-width="1" stroke-opacity="0.35"/>
-      <!-- étoiles -->
-      <circle cx="50" cy="6" r="4.5" fill="#F5C542"/>
-      <circle cx="88" cy="28" r="2.2" fill="#E8EDF7"/>
-      <circle cx="74" cy="70" r="2" fill="#E8EDF7"/>
-      <circle cx="26" cy="70" r="2" fill="#E8EDF7"/>
-      <circle cx="12" cy="28" r="2.2" fill="#E8EDF7"/>
+      <polygon points="{poly}" fill="none" stroke="{blue}" stroke-width="1.3"
+        stroke-opacity="0.55" stroke-linejoin="round"/>
+      <line x1="50" y1="8" x2="72" y2="72" stroke="{blue}" stroke-width="0.8" stroke-opacity="0.25"/>
+      <line x1="50" y1="8" x2="28" y2="72" stroke="{blue}" stroke-width="0.8" stroke-opacity="0.25"/>
+      <line x1="14" y1="30" x2="86" y2="30" stroke="{blue}" stroke-width="0.8" stroke-opacity="0.25"/>
+      <circle cx="50" cy="8" r="4" fill="{gold}"/>
+      <circle cx="86" cy="30" r="1.8" fill="{text}" opacity="0.8"/>
+      <circle cx="72" cy="72" r="1.6" fill="{text}" opacity="0.8"/>
+      <circle cx="28" cy="72" r="1.6" fill="{text}" opacity="0.8"/>
+      <circle cx="14" cy="30" r="1.8" fill="{text}" opacity="0.8"/>
     </svg>
     """
 
 
-def header_html(status_text: str = "SYSTÈME ACTIF") -> str:
+def header_html(live: bool) -> str:
+    """Header avec état de connexion explicite dans le chip (coin droit) :
+    « PAPER CONNECTED » (vert, dot pulsant) ou « DISCONNECTED » (rouge)."""
+    status_text = "PAPER CONNECTED" if live else "DISCONNECTED"
+    status_cls = "live" if live else "off"
     return f"""
     <div class="auriga-header">
       {logo_svg()}
@@ -282,70 +245,150 @@ def header_html(status_text: str = "SYSTÈME ACTIF") -> str:
         <p class="auriga-title">AURIGA<span class="gold">.</span></p>
         <p class="auriga-subtitle">Autonomous Quant Research Agent</p>
       </div>
-      <div class="auriga-status"><span class="dot"></span>{status_text}</div>
+      <div class="auriga-status {status_cls}"><span class="dot"></span>{status_text}</div>
     </div>
     """
 
 
-def kpi_html(label: str, value: str, sub: str = "", cls: str = "") -> str:
-    return f"""
-    <div class="auriga-kpi">
-      <div class="auriga-kpi-label">{label}</div>
-      <div class="auriga-kpi-value {cls}">{value}</div>
-      <div class="auriga-kpi-sub">{sub}</div>
-    </div>
+def connection_banner_html(live: bool, error: str = "") -> str:
+    """Bandeau d'état — rendu UNIQUEMENT quand la connexion Alpaca a échoué.
+
+    Le mode connecté reste épuré (le chip vert du header suffit). En mode
+    démo/déconnecté, aucune ambiguïté : message d'avertissement explicite,
+    aucune donnée réelle n'est affichée par ailleurs.
     """
+    if live:
+        return ""
+    err = f" · {error[:100]}" if error else ""
+    return (
+        "<div style='background:rgba(240,86,110,0.08);border:1px solid "
+        "rgba(240,86,110,0.35);border-radius:6px;padding:9px 14px;"
+        "margin-bottom:14px;font-family:JetBrains Mono,monospace;"
+        "font-size:0.78rem;color:var(--red)'>"
+        "⚠ ALPACA DISCONNECTED — AFFICHAGE DÉMO (aucune donnée réelle)"
+        f"{err}</div>"
+    )
 
 
-def section_html(title: str) -> str:
-    return f'<div class="auriga-section"><span class="star">✦</span>{title}</div>'
+def metrics_strip_html(metrics: list[dict]) -> str:
+    """Strip de métriques unifiée (remplace 4 cartes KPI identiques).
 
-
-def position_html(symbol: str, direction: str, strategy: str, risk: float) -> str:
-    dir_cls = "dir-long" if direction == "LONG" else "dir-short"
-    badge_cls = "badge-long" if direction == "LONG" else "badge-short"
-    return f"""
-    <div class="auriga-position">
-      <div>
-        <span class="sym">{symbol}</span>
-        <span class="badge {badge_cls}">{direction}</span>
-        <div class="strat">{strategy}</div>
-      </div>
-      <div class="risk">risk ${risk:,.0f}</div>
-    </div>
+    Chaque item : {"label": str, "value": str, "sub": str,
+                    "cls": "pos"|"neg"|"" (optionnel), "hero": bool (optionnel)}.
+    Le premier métrique porté en "hero" prend la place du gros chiffre —
+    ici l'equity, la donnée la plus importante du dashboard.
     """
+    parts = []
+    for m in metrics:
+        cls = m.get("cls", "")
+        hero_cls = "hero" if m.get("hero") else ""
+        parts.append(
+            f'<div class="auriga-metric {hero_cls}">'
+            f'<div class="auriga-metric-label">{m["label"]}</div>'
+            f'<div class="auriga-metric-value {cls}">{m["value"]}</div>'
+            f'<div class="auriga-metric-sub">{m.get("sub", "")}</div>'
+            f'</div>'
+        )
+    return f'<div class="auriga-metrics">{"".join(parts)}</div>'
 
 
-def gate_html(label: str, status: str, detail: str = "") -> str:
-    """status: 'ok' | 'warn' | 'block'"""
-    glyph = {"ok": "✓", "warn": "⚠", "block": "✕"}.get(status, "•")
-    return f"""
-    <div class="auriga-gate {status}">
-      <span class="glyph">{glyph}</span>
-      <span>{label}</span>
-      <span style="margin-left:auto;font-size:0.75rem">{detail}</span>
-    </div>
-    """
+def section_html(title: str, meta: str = "") -> str:
+    meta_html = f'<span class="meta">{meta}</span>' if meta else ""
+    return f'<div class="auriga-section"><span>{title}</span>{meta_html}</div>'
 
 
-def constellation_svg(
-    strategies: list[dict],
-    width: int = 640,
-    height: int = 320,
-) -> str:
-    """Génère la « constellation » des stratégies actives.
+def equity_panel_html(live: bool, starting_capital: float = 100_000.0) -> str:
+    """État vide honnête pour la courbe d'equity — pas de faux graphique."""
+    note = (
+        "Historique en cours de constitution — la courbe apparaîtra après "
+        "les premiers cycles enregistrés."
+        if live else
+        "Compte de démonstration — aucun historique réel à afficher."
+    )
+    return (
+        '<div class="auriga-panel dim-text" style="min-height:220px;display:flex;'
+        'flex-direction:column;justify-content:center;align-items:center;'
+        'text-align:center;gap:6px">'
+        f'<div class="mono" style="color:var(--text-dim);font-size:0.82rem">'
+        f'Capital de départ : ${starting_capital:,.0f}</div>'
+        f'<div>{note}</div>'
+        '</div>'
+    )
 
-    Chaque stratégie = une étoile ; les liens = corrélation/partage de
-    l'univers. La taille de l'étoile = score de la stratégie.
-    """
+
+def positions_table_html(rows: list[dict]) -> str:
+    """rows: [{"symbol", "direction", "strategy", "risk"}]"""
+    if not rows:
+        return (
+            '<div class="dim" style="padding:6px 2px">Aucune position ouverte — '
+            'le système attend des signaux validés par le risk engine.</div>'
+        )
+    body = []
+    for r in rows:
+        side_cls = "long" if r["direction"] == "LONG" else "short"
+        body.append(
+            f'<tr><td class="mono strong">{r["symbol"]}</td>'
+            f'<td><span class="side {side_cls}">{r["direction"]}</span></td>'
+            f'<td class="dim">{r["strategy"]}</td>'
+            f'<td class="mono num">${r["risk"]:,.0f}</td></tr>'
+        )
+    return (
+        '<table class="auriga-table"><thead><tr>'
+        '<th>Symbole</th><th>Sens</th><th>Stratégie</th><th class="num">Risque max</th>'
+        '</tr></thead><tbody>' + "".join(body) + '</tbody></table>'
+    )
+
+
+def strategies_table_html(rows: list[dict]) -> str:
+    """rows: [{"symbol", "direction", "score", "weight", "condition"}]"""
+    if not rows:
+        return (
+            '<div class="dim" style="padding:6px 2px">Aucune stratégie — lancer '
+            '<span class="mono">auriga research</span> pour découvrir des stratégies.</div>'
+        )
+    body = []
+    for r in rows:
+        side_cls = "long" if r["direction"] == "LONG" else "short"
+        body.append(
+            f'<tr><td class="mono strong">{r["symbol"]}</td>'
+            f'<td><span class="side {side_cls}">{r["direction"]}</span></td>'
+            f'<td class="mono num">{r["score"]:.2f}</td>'
+            f'<td class="mono num">{r["weight"] * 100:.0f}%</td></tr>'
+        )
+        if r.get("condition"):
+            body.append(
+                f'<tr class="cond-row"><td colspan="4" class="mono">{r["condition"]}</td></tr>'
+            )
+    return (
+        '<table class="auriga-table"><thead><tr>'
+        '<th>Symbole</th><th>Sens</th><th class="num">Score</th><th class="num">Poids</th>'
+        '</tr></thead><tbody>' + "".join(body) + '</tbody></table>'
+    )
+
+
+def gates_list_html(gates: list[dict]) -> str:
+    """gates: [{"label", "status": "ok"|"warn"|"block", "detail"}]"""
+    rows = []
+    for g in gates:
+        rows.append(
+            f'<div class="auriga-gate-row {g["status"]}"><span class="dot"></span>'
+            f'<span class="label">{g["label"]}</span>'
+            f'<span class="detail">{g.get("detail", "")}</span></div>'
+        )
+    return f'<div class="auriga-gates">{"".join(rows)}</div>'
+
+
+def constellation_svg(strategies: list[dict], width: int = 640, height: int = 320) -> str:
+    """Constellation des stratégies actives — étoile = stratégie, taille = score."""
     if not strategies:
-        return "<div class='dim' style='padding:30px;text-align:center'>Aucune stratégie active — lancer la recherche</div>"
+        return (
+            "<div class='dim' style='padding:30px;text-align:center'>"
+            "Aucune stratégie active — lancer la recherche</div>"
+        )
 
     n = len(strategies)
-    import math
-
     cx, cy = width / 2, height / 2
-    r = min(width, height) / 2 - 40
+    r = min(width, height) / 2 - 36
     positions = []
     for i, s in enumerate(strategies):
         angle = -math.pi / 2 + 2 * math.pi * i / n
@@ -353,48 +396,50 @@ def constellation_svg(
         y = cy + r * 0.85 * math.sin(angle)
         positions.append((x, y, s))
 
+    blue, gold, dim = COLORS["blue"], COLORS["gold"], COLORS["text_dim"]
     parts = []
-    # Liens entre étoiles voisines (constellation)
     for i in range(n):
         x1, y1, _ = positions[i]
         x2, y2, _ = positions[(i + 1) % n]
         parts.append(
             f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" '
-            f'stroke="#4DA3FF" stroke-width="0.8" stroke-opacity="0.35"/>'
+            f'stroke="{blue}" stroke-width="0.8" stroke-opacity="0.3"/>'
         )
-    # Quelques liens croisés
     for i in range(0, n, 2):
         if i + 2 < n:
             x1, y1, _ = positions[i]
             x2, y2, _ = positions[i + 2]
             parts.append(
                 f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" '
-                f'stroke="#F5C542" stroke-width="0.5" stroke-opacity="0.15"/>'
+                f'stroke="{gold}" stroke-width="0.5" stroke-opacity="0.12"/>'
             )
-    # Étoiles
     for x, y, s in positions:
         score = s.get("score", 0.5)
         rad = 3 + score * 6
         sym = s.get("symbol", "?")
         direction = s.get("direction", "LONG")
-        color = "#2EE6A8" if direction == "LONG" else "#FF5C7A"
+        color = COLORS["green"] if direction == "LONG" else COLORS["red"]
+        parts.append(f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{rad:.1f}" fill="{color}" opacity="0.9"/>')
         parts.append(
-            f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{rad:.1f}" fill="{color}" opacity="0.9"/>'
-        )
-        parts.append(
-            f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{rad*2.6:.1f}" fill="none" '
-            f'stroke="{color}" stroke-width="0.5" opacity="0.25"/>'
+            f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{rad * 2.2:.1f}" fill="none" '
+            f'stroke="{color}" stroke-width="0.5" opacity="0.2"/>'
         )
         parts.append(
             f'<text x="{x:.0f}" y="{y - rad - 8:.0f}" text-anchor="middle" '
-            f'fill="#8A94AD" font-size="9" font-family="JetBrains Mono">{sym}</text>'
+            f'fill="{dim}" font-size="9" font-family="JetBrains Mono">{sym}</text>'
         )
 
     return f"""
     <div class="auriga-constellation">
-      <svg viewBox="0 0 {width} {height}">
-        <rect width="{width}" height="{height}" fill="transparent"/>
-        {''.join(parts)}
-      </svg>
+      <svg viewBox="0 0 {width} {height}">{''.join(parts)}</svg>
     </div>
     """
+
+
+def footer_html() -> str:
+    return (
+        '<div class="auriga-footer">'
+        '<span>AURIGA — Autonomous Quant Research &amp; Investment Agent</span>'
+        '<span>Paper trading · Options définis-risque · Le LLM propose, le moteur dispose</span>'
+        '</div>'
+    )
