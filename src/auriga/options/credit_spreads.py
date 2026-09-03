@@ -74,6 +74,7 @@ def build_put_credit_spread(
     # max_risk = largeur − crédit reçu ; max_profit = crédit
     return SpreadStrategy(
         signal=None,  # pas de signal directionnel (vente systématique)
+        symbol=symbol,  # sous-jacent porté par le champ direct
         name="put_credit_spread",
         legs=[sell_leg, buy_leg],
         max_risk=round(max(width - credit, 0.01), 2),
@@ -120,6 +121,7 @@ def build_call_credit_spread(
 
     return SpreadStrategy(
         signal=None,
+        symbol=symbol,  # sous-jacent porté par le champ direct
         name="call_credit_spread",
         legs=[sell_leg, buy_leg],
         max_risk=round(max(width - credit, 0.01), 2),
