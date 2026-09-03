@@ -43,6 +43,32 @@ def build_y_future(close: np.ndarray, horizon_bars: int) -> np.ndarray:
     return y
 
 
+def build_vol_future(close: np.ndarray, horizon_bars: int, vol_window: int = 20) -> np.ndarray:
+    """Calcule le label de VOLATILITÉ future signé.
+
+    Y_vol[t] = RV[t+H] / RV[t] - 1  où RV = vol réalisée (rolling window).
+
+    Positif → la volatilité va AUGMENTER (achat de vol / long straddle).
+    Négatif → la volatilité va DIMINUER (vente de vol / credit spread).
+    """
+    from auriga.features.quantitative import _numba_realized_volatility as _rv_fn
+
+    close = np.asarray(close, dtype=np.float64)
+    n = len(close)
+    rets = np.full(n, np.nan, dtype=np.float64)
+    if n > 1:
+        rets[1:] = close[1:] / close[:-1] - 1.0
+    rv = np.asarray(_rv_fn(rets, vol_window), dtype=np.float64)
+
+    y = np.full(n, np.nan, dtype=np.float64)
+    for t in range(n - horizon_bars):
+        rv_t = rv[t]
+        rv_future = rv[t + horizon_bars]
+        if rv_t is not None and not np.isnan(rv_t) and rv_t > 1e-12 and not np.isnan(rv_future):
+            y[t] = rv_future / rv_t - 1.0
+    return y
+
+
 def build_labels_from_frame(
     ohlcv: pl.DataFrame,
     feature_frame: pl.DataFrame,
