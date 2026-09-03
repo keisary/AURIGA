@@ -73,7 +73,13 @@ class RiskEngine:
 
     # ------------------------------------------------------------------
     def _run_extra_checks(self, spread: SpreadStrategy) -> tuple[list[str], list[str]]:
-        """Exécute les gates externes. Retourne (raisons, bloquants)."""
+        """Exécute les gates externes. Retourne (raisons, bloquants).
+
+        FAIL-CLOSED (revue 2026-09-03) : une gate qui ne peut pas être
+        vérifiée (exception, donnée manquante) BLOQUE l'ordre. Pour un
+        système de trading, "je ne peux pas vérifier le risque" doit être
+        traité comme un risque, pas comme un feu vert.
+        """
         reasons: list[str] = []
         blocked: list[str] = []
         for fn, label in self.extra_checks:
@@ -84,9 +90,9 @@ class RiskEngine:
                 else:
                     blocked.append(f"{label}: {detail}")
             except Exception as e:
-                # Une gate externe qui échoue ne doit pas bloquer par erreur
-                reasons.append(f"{label}_unavailable")
-                logger.debug("gate %s erreur: %s", label, e)
+                # FAIL-CLOSED : gate indisponible → on bloque (pas de log only)
+                blocked.append(f"{label}: unavailable ({str(e)[:80]})")
+                logger.warning("Gate %s INOPÉRANTE → ordre bloqué: %s", label, e)
         return reasons, blocked
 
     # ------------------------------------------------------------------

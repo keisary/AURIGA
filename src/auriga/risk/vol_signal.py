@@ -245,37 +245,59 @@ class VolRiskEngine:
 
     # ------------------------------------------------------------------
     def is_danger(self, symbol: str, recent_bars: pl.DataFrame) -> tuple[bool, VolRiskOutput | None]:
-        """True si le risque vol bloque les ventes de prime sur cet actif."""
+        """True si le risque vol bloque les ventes de prime sur cet actif.
+
+        FAIL-CLOSED : modèle absent / données insuffisantes → bloquer
+        (vol_level='unknown' traité comme danger par l'appelant).
+        """
         out = self.score_recent(symbol, recent_bars)
         if out is None:
-            return False, None  # pas de signal → on n'invente pas un danger
-        return out.vol_level == "danger", out
+            return True, VolRiskOutput(
+                symbol=symbol, danger_proba=1.0, vol_level="unknown",
+                horizon_bars=self.horizon_bars,
+            )
+        return out.vol_level in ("danger", "unknown"), out
 
     def is_danger_from_features(
         self, symbol: str, feats_recent: pl.DataFrame
     ) -> tuple[bool, VolRiskOutput | None]:
         """Score le danger vol depuis des features DÉJÀ calculées (optimisation).
 
-        Évite de recalculer compute_features quand l'appelant les a déjà.
+        FAIL-CLOSED (revue 2026-09-03) : si le modèle est absent ou les
+        données insuffisantes, on retourne un niveau 'unknown' qui DOIT
+        bloquer la vente de prime (on ne vend pas sans pouvoir évaluer le
+        risque vol). L'appelant traite 'unknown' comme un blocage.
         """
         entry = self._models.get(symbol)
         if entry is None:
             if not self.load(symbol):
-                return False, None
+                return True, VolRiskOutput(
+                    symbol=symbol, danger_proba=1.0, vol_level="unknown",
+                    horizon_bars=self.horizon_bars,
+                )
             entry = self._models.get(symbol)
         if entry is None:
-            return False, None
+            return True, VolRiskOutput(
+                symbol=symbol, danger_proba=1.0, vol_level="unknown",
+                horizon_bars=self.horizon_bars,
+            )
         model, auc = entry
 
         try:
             feature_names = [c for c in feats_recent.columns if c != "timestamp"]
             X = feats_recent.select(feature_names).to_numpy().astype(np.float32)
             if X.shape[0] < 50:
-                return False, None
+                return True, VolRiskOutput(
+                    symbol=symbol, danger_proba=1.0, vol_level="unknown",
+                    horizon_bars=self.horizon_bars,
+                )
             proba = float(model.predict_proba(X[-1:, :])[0, 1])
         except Exception as e:
-            logger.debug("is_danger_from_features %s: %s", symbol, e)
-            return False, None
+            logger.warning("Signal vol %s INOPÉRANT → blocage: %s", symbol, e)
+            return True, VolRiskOutput(
+                symbol=symbol, danger_proba=1.0, vol_level="unknown",
+                horizon_bars=self.horizon_bars,
+            )
 
         if proba >= self.threshold:
             level = "danger"
@@ -291,4 +313,6 @@ class VolRiskEngine:
             horizon_bars=self.horizon_bars,
             model_auc=round(auc, 3),
         )
+        # 'unknown' n'apparaît que via les retours anticipés (déjà True) ;
+        # ici le modèle a répondu : danger uniquement si niveau danger.
         return level == "danger", out
