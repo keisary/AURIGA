@@ -117,3 +117,64 @@ def _merge_same_feature(a: Condition, b: Condition) -> Condition | None:
         # Garder la borne la plus basse : min(a.value, b.value)
         return a if a.value <= b.value else b
     return None  # bornes de nature différente (inf + sup) : on garde les deux
+
+
+# ---------------------------------------------------------------------------
+# Évaluation vectorisée (pour le backtest)
+# ---------------------------------------------------------------------------
+
+def evaluate_ast_on_array(
+    ast: Condition | ConditionNode,
+    X: np.ndarray,
+    feature_names: list[str],
+) -> np.ndarray:
+    """Évalue l'AST sur toute une matrice X (vectorisé numpy).
+
+    Returns:
+        mask : (N,) bool, True aux indices où la condition est vraie.
+        NaN → False (une comparaison avec NaN est toujours fausse).
+    """
+    name_to_idx = {n: i for i, n in enumerate(feature_names)}
+    return _eval_ast_numpy(ast, X, name_to_idx)
+
+
+def _eval_ast_numpy(
+    node: Condition | ConditionNode,
+    X: np.ndarray,
+    name_to_idx: dict[str, int],
+) -> np.ndarray:
+    """Évalue récursivement un sous-arbre → mask numpy (N,)."""
+    n = X.shape[0]
+    if isinstance(node, Condition):
+        idx = name_to_idx.get(node.feature_ref)
+        if idx is None:
+            return np.zeros(n, dtype=bool)
+        col = X[:, idx]
+        op = node.operator
+        v = node.value
+        if op == "<":
+            return col < v
+        if op == "<=":
+            return col <= v
+        if op == ">":
+            return col > v
+        if op == ">=":
+            return col >= v
+        if op == "==":
+            return np.abs(col - v) < 1e-9
+        if op == "!=":
+            valid = ~np.isnan(col)
+            return valid & (np.abs(col - v) >= 1e-9)
+        raise ValueError(f"Opérateur de comparaison non supporté : {op}")
+
+    left_mask = _eval_ast_numpy(node.left, X, name_to_idx)
+    if node.op == "NOT":
+        return ~left_mask
+    right_mask = _eval_ast_numpy(node.right, X, name_to_idx)
+    if node.op == "AND":
+        return left_mask & right_mask
+    if node.op == "OR":
+        return left_mask | right_mask
+    if node.op == "XOR":
+        return left_mask ^ right_mask
+    raise ValueError(f"Opérateur logique non supporté : {node.op}")

@@ -63,6 +63,7 @@ class EinherMetrics:
     cagr: float = 0.0
     avg_net_return: float = 0.0
     total_return: float = 0.0
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +76,7 @@ class EinherMetrics:
             "cagr": round(self.cagr, 4),
             "avg_net_return": round(self.avg_net_return, 6),
             "total_return": round(self.total_return, 4),
+            "extra": self.extra,
         }
 
 
