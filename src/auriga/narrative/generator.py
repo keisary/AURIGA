@@ -74,7 +74,7 @@ class NarrativeGenerator:
         cfg = get_config()
         nar = cfg.narrative
         self.api_key = api_key or cfg.openrouter_api_key
-        self.model = model or nar.get("model", "deepseek/deepseek-chat")
+        self.model = model or cfg.llm_model  # AURIGA_LLM_MODEL prioritaire
         self.base_url = base_url or nar.get("base_url", "https://openrouter.ai/api/v1")
         self.max_tokens = int(nar.get("max_tokens", 1500))
         self.temperature = float(nar.get("temperature", 0.4))

@@ -70,6 +70,7 @@ risk:
   liquidation_threshold: 0.25  # -25% → liquidation des positions
 
 # --- Narratif LLM (REQ-F-NAR) ---
+# model peut être surchargé par la variable d'env AURIGA_LLM_MODEL (ex: z-ai/glm-5.2:free)
 narrative:
   enabled: true
   provider: "openrouter"

@@ -97,6 +97,13 @@ class Config:
         return os.getenv("OPENROUTER_API_KEY")
 
     @property
+    def llm_model(self) -> str:
+        """Modèle LLM : AURIGA_LLM_MODEL (env) sinon narrative.model (yaml)."""
+        return os.getenv("AURIGA_LLM_MODEL") or self.raw.get("narrative", {}).get(
+            "model", "deepseek/deepseek-chat"
+        )
+
+    @property
     def has_alpaca_credentials(self) -> bool:
         return bool(self.alpaca_api_key and self.alpaca_secret_key)
 

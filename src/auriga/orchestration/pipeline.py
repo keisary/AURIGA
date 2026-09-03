@@ -101,7 +101,7 @@ def run_research_mode(
         # observés. Le holdout (20% final) reste VIERGE pour la validation
         # définitive (pas de fuite). NB: backtester sur train inclut une part
         # d'optimisme (le modèle a vu ces barres) — le holdout est la vérité.
-        admitted_hz: list[Any] = []
+        backtested: list[Any] = []
         for ein in candidates:
             sym_key = ein.symbol if ein.symbol in labeled else next(iter(labeled.keys()))
             data = labeled.get(sym_key)
@@ -134,10 +134,21 @@ def run_research_mode(
                         "avg_loss": float(abs(rets[rets < 0].mean())) if (rets < 0).any() else 0.0,
                     }
                 })})
-            if m.n_trades >= 30 and m.sharpe_ratio >= 1.0 and m.win_rate >= 0.55:
-                admitted_hz.append(ein)
+            backtested.append(ein)
 
-        logger.info("  %s: %d admis (seuils recherche)", hz_label, len(admitted_hz))
+        # Admission RÉELLE : seuils individuels + BH/FDR sur le lot de
+        # l'horizon (contrôle multi-tests — cause racine #3 corrigée).
+        admitted_hz = []
+        if backtested:
+            from auriga.backtest.admission import admit_einhers, default_admission_config
+
+            results = admit_einhers(backtested, cfg=default_admission_config())
+            for r in results:
+                if r.admitted:
+                    admitted_hz.append(r.einher)
+
+        logger.info("  %s: %d backtestés, %d admis (seuils + BH/FDR)",
+                    hz_label, len(backtested), len(admitted_hz))
         all_admitted.extend(admitted_hz)
         summary_per_horizon[hz_label] = {
             "candidates": len(candidates),
