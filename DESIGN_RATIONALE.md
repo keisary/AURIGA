@@ -17,11 +17,11 @@
 2. [Pourquoi la recherche de règles explicables (Einhers)](#2-pourquoi-la-recherche-de-règles-explicables)
 3. [Pourquoi XGBoost + arbres → règles](#3-pourquoi-xgboost--arbres--règles)
 4. [Pourquoi les options définis-risque (spreads)](#4-pourquoi-les-options-définis-risque)
-5. [Pourquoi la multi-agent architecture (3 moteurs + routeur)](#5-pourquoi-larchitecture-multi-agents)
+5. [Pourquoi l'architecture multi-agents (2 moteurs + signal de risque)](#5-pourquoi-larchitecture-multi-agents)
 6. [Agent A1 — Direction (momentum/régression)](#6-agent-a1--direction)
-7. [Agent A2 — Volatilité directionnelle (achat conditionnel)](#7-agent-a2--volatilité-directionnelle)
+7. [Agent A2 — Signal de risque de volatilité (plus aucun trading)](#7-agent-a2--signal-de-risque-de-volatilité-transformé-2026-09-03)
 8. [Agent A3 — Vendeur de prime (vente gatée)](#8-agent-a3--vendeur-de-prime)
-9. [Routeur de régime (méta-agent)](#9-routeur-de-régime)
+9. [Routeur de régime — arbitrage simplifié au code freeze](#9-routeur-de-régime)
 10. [Pourquoi le LLM hybride (propose, ne décide pas)](#10-pourquoi-le-llm-hybride)
 11. [Choix techniques](#11-choix-techniques)
 12. [Références complètes](#12-références-complètes)
@@ -36,11 +36,11 @@ définis-risque sur des actions/ETF US liquides, avec un narratif quotidien
 explicable.
 
 **Thèse centrale** : plutôt qu'un seul modèle qui prédit la direction des prix
-(signal faible, bruit dominant), AURIGA combine **plusieurs moteurs de recherche
-spécialisés** — direction, volatilité, vente de prime — chacun exploitant une
-source de rendement différente et robuste. La diversification des *sources
-d'alpha* est la vraie protection contre l'overfitting et la non-stationnarité
-des marchés.
+(signal faible, bruit dominant), AURIGA combine **deux moteurs de stratégies**
+(direction A1, vente de prime A3) **sécurisés par un signal de risque** de
+volatilité (A2) — chacun exploitant une source de rendement différente et
+robuste. La diversification des *sources d'alpha* est la vraie protection
+contre l'overfitting et la non-stationnarité des marchés.
 
 **Sources** :
 - Ilmanen, A. (2012). *Do Financial Markets Reward Buying or Selling Insurance
@@ -203,7 +203,9 @@ A2 ne produit PLUS de stratégies de trading autonomes. Il est transformé
 en **indicateur de risque** (VolSignal).
 
 **Mesure qui a motivé la décision** (AAPL 1H, backtest Black-Scholes
-corrigé avec annualisation + anti-tautologie) :
+corrigé avec annualisation + anti-tautologie — *proxy synthétique, la vol
+réalisée servant d'entrée : Alpaca ne fournit pas d'historique de prix
+d'options gratuit, voir SUBMISSION_WRITEUP §5*) :
 - Les straddles longs (achat de vol) sont **globalement PERDANTS** :
   sharpe médian −2.64 sur les règles avec >5 trades.
 - Ce résultat est conforme à la littérature : la prime de risque de vol
@@ -239,7 +241,10 @@ régime est calme, et S'ARRÊTER quand les signaux de risque (A2 vol_danger
   l'assurance et des tickets de loterie a généré des récompenses positives à
   long terme. »
 - **Mesure locale** : sur AAPL 1H, ~98.3% des périodes sont profitables à la
-  vente d'un short straddle — la base est de vendre.
+  vente d'un short straddle — la base est de vendre. (P&L reconstruit par
+  **proxy Black-Scholes** sur vol réalisée, pas par des prix d'options
+  historiques — la formulation exacte est : « ~98% des périodes sont
+  profitables *selon notre proxy synthétique de pricing* ».)
 
 **Le rôle du ML (gating)** : la vente de prime subit des **pertes
 catastrophiques rares** (~1.7% des périodes mesurées). Le ML n'apprend PAS
@@ -261,19 +266,27 @@ strike vendu ~3% OTM, protection ~5% plus loin.
 
 ## 9. Routeur de régime
 
-**Objectif** : classifier le régime de marché courant et router l'allocation
-vers l'agent adapté :
-- **Tendance haussière/baissière** → Agent A1 (direction).
-- **Range / vol basse** → Agent A3 (vendre de la prime).
-- **Pré-choc / vol élevée** → Agent A2 (acheter de la vol).
+**ÉTAT AU CODE FREEZE (04/09/2026)** : il n'existe PAS de méta-routeur
+implémenté comme module autonome dans le MVP. L'arbitrage entre agents est
+assuré par l'orchestration (chaque agent n'agit que lorsque sa propre
+condition se déclenche, et le Risk Engine tranche) :
+- **Tendance haussière/baissière** → Agent A1 (direction, spreads débit).
+- **Range / vol basse** → Agent A3 (vendre de la prime, credit spreads).
+- **Pré-choc / vol élevée** → le signal A2 **bloque** A3 (gate vol_danger) —
+  A2 ne produit plus JAMAIS d'achat de vol (mesure : straddles longs perdants,
+  voir §7).
 
-**Méthode** : classification sur features de régime (regime_50,
-vol_regime_50, Hurst, choppiness, kaufman efficiency). Simple et robuste
-(seuils ou petit modèle).
+**Note sur la conception initiale** : un classifieur de régime (features
+regime_50, vol_regime_50, Hurst, choppiness, kaufman efficiency) était prévu
+pour router l'allocation. Ces features restent calculées par le pipeline de
+features, mais le routeur lui-même n'a pas été nécessaire : la logique
+« chaque agent agit quand SA condition se déclenche, le Risk Engine tranche »
+a suffi au MVP et évite une couche de paramètres supplémentaire à 24h de la
+deadline. Un routeur explicite reste une piste V2.
 
 **Source** : « Tabular Deep Learning for Algorithmic Trading: Cross-Regime
 Bayesian Optimisation » (arXiv 2608.27076) — la robustesse aux régimes est la
-clé de la généralisation out-of-sample.
+clé de la généralisation out-of-sample (direction de recherche pour V2).
 
 ---
 
@@ -308,7 +321,7 @@ dispose) + cahier des charges AURIGA D2.
 | **Admission** | Seuils stricts (Sharpe≥2, WR≥0.65, PF≥1.5, trades≥30) + BH/FDR adaptatif + holdout vierge | Contrôle multi-tests, anti-overfitting |
 | **Sélection** | Score pondéré + diversify Jaccard + sizing mixte vol-target/Kelly | Portefeuille diversifié, risque maîtrisé |
 | **Exécution** | alpaca-py, ordres multi-leg MLEG, paper $100k | Format officiel Alpaca |
-| **Risque** | 6 gates (daily loss, exposure actif/secteur/total, positions) | REQ-F-RSK du cahier des charges |
+| **Risque** | 8 gates déterministes + ML (voir write-up §2) : daily loss, exposition actif/secteur/total, positions max, liquidation −25%, gate vol_danger (A2), règles AVOID_SELL (A3) — **fail-closed** | REQ-F-RSK du cahier des charges ; une gate invérifiable bloque l'ordre |
 
 ---
 

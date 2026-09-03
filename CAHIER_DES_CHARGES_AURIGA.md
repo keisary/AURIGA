@@ -51,6 +51,8 @@ Les décisions structurantes suivantes ont été validées avec le commanditaire
 | D13 | Scheduler | Lancement manuel du cycle + mode watch quotidien pour le hackathon (pas de cron complexe) |
 | D14 | Environnement | Venv dédié AURIGA/.venv (numpy, polars, numba, xgboost, alpaca-py, streamlit) |
 | D15 | Git | Travail sur main, commits réguliers (même workflow qu'einherjar) |
+| D16 | Évolution A2 (code freeze 04/09/2026) | Après mesure sur données réelles (straddles longs perdants, sharpe médian −2.64), A2 est transformé en **signal de risque vol** (VolSignal → gate vol_danger) : il ne génère plus de positions. Voir DESIGN_RATIONALE §5/§7. |
+| D17 | Périmètre moteur MVP (code freeze 04/09/2026) | La découverte livrée est **XGBoost seul** (A1 direction, A3 AVOID_SELL, A2 vol) ; la Programmation Génétique STGP et le walk-forward ne sont **pas implémentés** dans le MVP (holdout vierge conservé pour l'évaluation out-of-sample). Voir DESIGN_RATIONALE + SUBMISSION_WRITEUP §5. |
 
 **Audiences cibles** :
 - Équipe de développement (Jovanny + Hermes Agent)
@@ -85,7 +87,7 @@ Le système AURIGA ne doit PAS :
 
 | Version | Périmètre | Cible |
 |---|---|---|
-| V1 (MVP hackathon) | Research (XGBoost+STGP) → backtest → exécution paper + options (spreads) → dashboard Streamlit → narratif. Univers 25 large caps, 5 ans, TF 1H+1D | 4 septembre 2026 (deadline hackathon) |
+| V1 (MVP hackathon) | Research (XGBoost → règles) → backtest → exécution paper + options (spreads) → dashboard Streamlit → narratif. Univers 25 large caps, 5 ans, TF 1H+1D | 4 septembre 2026 (deadline hackathon) |
 | V2 | Univers élargi, plus de familles de features, optimisation du portefeuille, mode live | Post-hackathon |
 | V3 | Multi-compte, gestion de risque avancée, backtest de bout en bout en production | Long terme |
 
@@ -832,26 +834,28 @@ model NarrativeReport {
 
 | ID | Description | Priorité | UC | Test | Statut |
 |---|---|---|---|---|---|
-| REQ-F-ING-001 | Ingestion bars historiques Alpaca | H | UC-01 | TA-ING-01 | À tester |
-| REQ-F-ING-002 | Ingestion chaînes d'options | H | UC-01 | TA-ING-02 | À tester |
-| REQ-F-FEAT-001 | Features techniques (RSI, MACD, etc.) | H | UC-02 | TA-FEAT-01 | À tester |
-| REQ-F-FEAT-002 | Features quantitatives (Hurst, DFA, etc.) | M | UC-02 | TA-FEAT-02 | À tester |
-| REQ-F-DISC-001 | Découverte XGBoost → règles | H | UC-03 | TA-DISC-01 | À tester |
-| REQ-F-DISC-002 | Découverte STGP (search_engine) | H | UC-03 | TA-DISC-02 | À tester |
-| REQ-F-VAL-001 | Backtest avec coûts réels | H | UC-04 | TA-VAL-01 | À tester |
-| REQ-F-VAL-002 | Admission statistique (seuils) | H | UC-04 | TA-VAL-02 | À tester |
-| REQ-F-VAL-003 | BH/FDR adaptatif | H | UC-04 | TA-VAL-03 | À tester |
-| REQ-F-VAL-004 | Holdout hors échantillon | H | UC-04 | TA-VAL-04 | À tester |
-| REQ-F-VAL-005 | Walk-forward | M | UC-04 | TA-VAL-05 | À tester |
-| REQ-F-SEL-001 | Sélection portefeuille diversifié | H | UC-05 | TA-SEL-01 | À tester |
-| REQ-F-OPT-001 | Conversion signal → spread options | H | UC-06 | TA-OPT-01 | À tester |
-| REQ-F-EXEC-001 | Ordres paper Alpaca | H | UC-07 | TA-EXEC-01 | À tester |
-| REQ-F-RSK-001 | Daily loss limit | H | UC-08 | TA-RSK-01 | À tester |
-| REQ-F-NAR-001 | Narratif quotidien LLM | H | UC-09 | TA-NAR-01 | À tester |
-| REQ-F-ORC-001 | Cycle complet orchestré | H | UC-10 | TA-ORC-01 | À tester |
-| REQ-PERF-002 | Découverte ≤ 15 min | H | UC-03 | TP-ORC-02 | À tester |
-| REQ-AI-001 | Pas d'ordre direct par le LLM | H | UC-09 | TAI-AI-01 | À tester |
-| REQ-NF-SEC-001 | Aucun secret dans le code | H | — | TS-SEC-01 | À tester |
+| REQ-F-ING-001 | Ingestion bars historiques Alpaca | H | UC-01 | TA-ING-01 | FAIT |
+| REQ-F-ING-002 | Ingestion chaînes d'options | H | UC-01 | TA-ING-02 | FAIT |
+| REQ-F-FEAT-001 | Features techniques (RSI, MACD, etc.) | H | UC-02 | TA-FEAT-01 | FAIT |
+| REQ-F-FEAT-002 | Features quantitatives (Hurst, DFA, etc.) | M | UC-02 | TA-FEAT-02 | FAIT |
+| REQ-F-DISC-001 | Découverte XGBoost → règles | H | UC-03 | TA-DISC-01 | FAIT |
+| REQ-F-DISC-002 | Découverte STGP (search_engine) | H | UC-03 | TA-DISC-02 | Écart (D17) |
+| REQ-F-VAL-001 | Backtest avec coûts réels | H | UC-04 | TA-VAL-01 | FAIT |
+| REQ-F-VAL-002 | Admission statistique (seuils) | H | UC-04 | TA-VAL-02 | FAIT |
+| REQ-F-VAL-003 | BH/FDR adaptatif | H | UC-04 | TA-VAL-03 | FAIT |
+| REQ-F-VAL-004 | Holdout hors échantillon | H | UC-04 | TA-VAL-04 | FAIT |
+| REQ-F-VAL-005 | Walk-forward | M | UC-04 | TA-VAL-05 | Écart (D17) |
+| REQ-F-SEL-001 | Sélection portefeuille diversifié | H | UC-05 | TA-SEL-01 | FAIT |
+| REQ-F-OPT-001 | Conversion signal → spread options | H | UC-06 | TA-OPT-01 | FAIT |
+| REQ-F-EXEC-001 | Ordres paper Alpaca | H | UC-07 | TA-EXEC-01 | FAIT (code + dry-run validé) |
+| REQ-F-RSK-001 | Daily loss limit | H | UC-08 | TA-RSK-01 | FAIT |
+| REQ-F-NAR-001 | Narratif quotidien LLM | H | UC-09 | TA-NAR-01 | FAIT |
+| REQ-F-ORC-001 | Cycle complet orchestré | H | UC-10 | TA-ORC-01 | FAIT |
+| REQ-PERF-002 | Découverte ≤ 15 min | H | UC-03 | TP-ORC-02 | FAIT (run 25 actifs ≈ 2 min) |
+| REQ-AI-001 | Pas d'ordre direct par le LLM | H | UC-09 | TAI-AI-01 | FAIT |
+| REQ-NF-SEC-001 | Aucun secret dans le code | H | — | TS-SEC-01 | FAIT |
+
+*Statuts au code freeze (04/09/2026). FAIT = implémenté et exercé par un run de bout en bout et/ou un test automatisé (`tests/test_data.py`, `test_features.py`, `test_critical.py` — 9 tests critiques). Écart (D17) = exigence du SRS non retenue pour le MVP, voir D17 et DESIGN_RATIONALE.*
 
 ## Annexe E — Glossaire
 
@@ -910,16 +914,25 @@ model NarrativeReport {
 
 ## FIN DU DOCUMENT
 
-**Statut** : À valider
-**Prochaines étapes** :
-1. Valider les 4 décisions structurantes (nom, LLM hybride, moteurs XGBoost+GP, options paper)
-2. Valider l'univers de 20-30 large caps
-3. Créer le compte paper Alpaca + clés API
-4. Initialiser le dépôt git du projet AURIGA
-5. Implémenter les modules dans l'ordre : ING → FEAT → DISC → VAL → SEL → OPT → EXEC → RSK → NAR → ORC → DASH
+**Statut** : CLÔTURÉ — spécification initiale du projet (SRS).
+
+Ce document a servi de contrat de spécification pendant le développement.
+Au code freeze (04/09/2026), l'implémentation livrée couvre le périmètre V1
+(voir matrice RTM, Annexe D) ; les évolutions actées en cours de route sont
+enregistrées en D16/D17. Pour l'état actuel du système, se référer à :
+- `README.md` — architecture livrée ;
+- `DESIGN_RATIONALE.md` — décisions de conception à jour (A2 = signal de risque) ;
+- `SUBMISSION_WRITEUP.md` — one-page write-up pour le jury.
+
+**Étapes du plan initial — état** :
+1. ✅ Décisions structurantes validées (nom, LLM hybride, moteurs XGBoost, options paper) — voir §1.1-bis
+2. ✅ Univers de 25 large caps validé (D7)
+3. ✅ Compte paper Alpaca + clés API (paper uniquement, jamais commitées)
+4. ✅ Dépôt git initialisé et public (github.com/keisary/AURIGA)
+5. ✅ Modules implémentés : ING → FEAT → DISC → VAL → SEL → OPT → EXEC → RSK → NAR → ORC → DASH
 
 **Signatures** :
-- Product Owner : Jovanny - [Date]
-- Tech Lead : Hermes Agent - [Date]
-- QA Lead : Hermes Agent - [Date]
-- Sponsor : Hackathon Alpaca AI Trading Agents 2026 - [Date]
+- Product Owner : Jovanny — 03/09/2026
+- Tech Lead : Hermes Agent — 03/09/2026
+- QA Lead : Hermes Agent — 03/09/2026
+- Sponsor : Hackathon Alpaca AI Trading Agents 2026 — 03/09/2026

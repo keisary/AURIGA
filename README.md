@@ -108,8 +108,9 @@ python -m streamlit run src/auriga/dashboard/app.py    # dashboard
 
 ## Tests
 
-```bash
-PYTHONPATH=src python -m pytest tests/ -q
+```powershell
+python -m pytest tests/ -q
+# (pythonpath=src déjà configuré dans pyproject.toml — pas de PYTHONPATH à poser)
 ```
 
 *Projet de recherche en paper trading — pas un conseil financier.*
