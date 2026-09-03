@@ -23,52 +23,6 @@ from auriga.types import OptionLeg, Signal, SpreadStrategy
 logger = logging.getLogger(__name__)
 
 
-def select_strikes(
-    chain: pl.DataFrame,
-    spot: float,
-    direction: str,  # 'LONG' | 'SHORT'
-    option_type: str,  # 'call' | 'put'
-    spread_pct: float = 0.05,  # largeur du spread en fraction du spot (5%)
-    min_delta_abs: float = 0.20,
-    max_delta_abs: float = 0.45,
-) -> tuple[pl.DataFrame, pl.DataFrame] | None:
-    """Sélectionne les deux jambes d'un spread vertical depuis la chaîne.
-
-    Pour un LONG call : acheter le call dont le strike est juste SOUS le spot
-    (ATM/ITM léger), vendre le call ~5% plus haut.
-    Pour un SHORT call (credit) : vendre le call juste AU-DESSUS du spot.
-
-    Returns:
-        (leg_achat, leg_vente) filtrées et triées, ou None si introuvable.
-    """
-    # Garder les options du bon type avec un prix
-    opts = chain.filter(pl.col("type") == option_type).filter(pl.col("strike") > 0)
-
-    if direction == "LONG" and option_type == "call":
-        # Bull call spread : acheter strike <= spot, vendre strike > spot
-        buy = opts.filter(pl.col("strike") <= spot * (1 + spread_pct * 0.3)).sort("strike", descending=True)
-        sell_target = spot * (1 + spread_pct)
-        sell = opts.filter(pl.col("strike") >= sell_target).sort("strike")
-    elif direction == "LONG" and option_type == "put":
-        # Bear put spread : vendre strike >= spot, acheter strike < spot... 
-        # (voir strategies.build ci-dessous pour la logique complète)
-        return None
-    elif direction == "SHORT" and option_type == "call":
-        # Call credit spread : vendre call OTM (strike > spot), acheter plus haut
-        sell = opts.filter(pl.col("strike") >= spot * (1 + spread_pct * 0.3)).sort("strike")
-        buy_target = spot * (1 + spread_pct * 1.3)
-        buy = opts.filter(pl.col("strike") >= buy_target).sort("strike")
-    else:
-        # Put credit spread : vendre put OTM (strike < spot), acheter plus bas
-        sell = opts.filter(pl.col("strike") <= spot * (1 - spread_pct * 0.3)).sort("strike", descending=True)
-        buy_target = spot * (1 - spread_pct * 1.3)
-        buy = opts.filter(pl.col("strike") <= buy_target).sort("strike", descending=True)
-
-    if buy is None or sell is None or len(buy) == 0 or len(sell) == 0:
-        return None
-    return buy.head(1), sell.head(1)
-
-
 def _row_to_leg(row: dict, side: str) -> OptionLeg:
     """Convertit une ligne polars en OptionLeg."""
     return OptionLeg(
@@ -150,7 +104,9 @@ def build_spread(
         # Chaîne sans prix (mode snapshot incomplet) : on estime la largeur
         return None
 
-    # Nom du spread
+    # Nom + nature du spread (débit = on paie, crédit = on reçoit)
+    is_debit_spread = (direction == "LONG" and option_type == "call") or \
+                      (direction == "SHORT" and option_type == "put")
     if direction == "LONG" and option_type == "call":
         name = "bull_call_spread"
     elif direction == "SHORT" and option_type == "put":
@@ -160,20 +116,19 @@ def build_spread(
     else:
         name = "put_credit_spread"
 
-    # Débit (payé) si on achète le strike inférieur (bull call / bear put) ;
-    # crédit (reçu) si on vend le strike proche (credit spreads).
-    is_debit = (direction == "LONG" and option_type == "call") or \
-               (direction == "SHORT" and option_type == "put")
-    # NOTE: bear_put_spread est un débit (achat put + vente put plus bas)
-    debit = mid_buy - mid_sell if (direction == "LONG" and option_type == "call") else (mid_buy - mid_sell)
-    credit = mid_sell - mid_buy if (name in ("call_credit_spread", "put_credit_spread")) else 0.0
+    # Débit net = prix payé pour la jambe achetée − prix reçu pour la jambe vendue.
+    # Crédit net = l'inverse (on vend la jambe chère, on achète la jambe moins chère).
+    net = mid_buy - mid_sell if is_debit_spread else mid_sell - mid_buy
 
-    if is_debit:
-        net = max(debit, 0.01)
+    if net <= 0.01:
+        return None  # spread sans valeur (bid/ask invalides)
+
+    if is_debit_spread:
+        # Spread débit : risque = débit payé, gain max = largeur − débit
         max_risk = net
         max_profit = max(width - net, 0.01)
     else:
-        net = max(credit, 0.01)
+        # Spread crédit : risque = largeur − crédit reçu, gain max = crédit
         max_risk = max(width - net, 0.01)
         max_profit = net
 
