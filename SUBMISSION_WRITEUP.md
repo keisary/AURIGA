@@ -83,6 +83,21 @@ narrates facts after the deterministic engine has acted.
 3. **Two orthogonal income streams** : directional debit spreads (trend) +
    gated premium selling (range/theta) — one hedge of the other.
 4. **Institutional-grade risk** : 8 deterministic gates + ML risk flags before
-   any order.
+   any order. Fail-closed by design : any gate that cannot be verified
+   blocks the order.
+
+## 5. Limitations (stated honestly)
+
+- **Options backtest is a synthetic proxy.** Alpaca's free tier does not
+  provide historical options prices, so option P&L in backtests is estimated
+  via Black-Scholes repricing using realized volatility (IV = RV + risk
+  premium). Statements like "X% of periods were profitable" refer to this
+  *synthetic pricing proxy*, NOT to actual historical option fills. Live
+  paper fills (which use real option quotes) are the ground truth.
+- **A final 20% temporal holdout is kept untouched** during strategy
+  discovery and admission, for out-of-sample evaluation. Metrics shown are
+  from the train+validation window; holdout results are not claimed yet.
+- **5 days of P&L is a small sample.** Results during the competition period
+  are indicative, not statistically conclusive.
 
 *Disclaimer : paper trading research only — not investment advice.*

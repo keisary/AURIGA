@@ -60,9 +60,11 @@ def load_account() -> dict:
             "live": True,
         }
     except Exception as e:
+        # MODE DÉMO explicite — les valeurs sont des placeholders VISIBLES,
+        # jamais présentées comme un vrai compte connecté.
         return {
-            "equity": 100_000.0, "cash": 100_000.0, "buying_power": 400_000.0,
-            "day_pnl": 0.0, "total_pnl": 0.0, "n_positions": 0,
+            "equity": None, "cash": None, "buying_power": None,
+            "day_pnl": None, "total_pnl": None, "n_positions": 0,
             "live": False, "error": str(e),
         }
 
@@ -125,21 +127,44 @@ narrative = load_narrative()
 risk_state = load_risk_state()
 
 # ----- Header -----
-status_text = "SYSTÈME ACTIF" if account.get("live") else "MODE DÉMO"
+status_text = "PAPER CONNECTED" if account.get("live") else "MODE DÉMO"
 st.markdown(styles.header_html(status_text), unsafe_allow_html=True)
+
+# Bandeau de connexion explicite (CONNECTED / DISCONNECTED)
+if account.get("live"):
+    st.markdown(
+        "<div style='background:rgba(46,230,168,0.08);border:1px solid rgba(46,230,168,0.3);"
+        "border-radius:8px;padding:8px 14px;margin-bottom:12px;font-family:JetBrains Mono,monospace;"
+        "font-size:0.8rem;color:#2EE6A8'>● ALPACA PAPER TRADING — CONNECTED</div>",
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown(
+        f"<div style='background:rgba(255,92,122,0.1);border:1px solid rgba(255,92,122,0.4);"
+        f"border-radius:8px;padding:8px 14px;margin-bottom:12px;font-family:JetBrains Mono,monospace;"
+        f"font-size:0.8rem;color:#FF5C7A'>⚠ ALPACA DISCONNECTED — AFFICHAGE DÉMO (aucune donnée réelle)"
+        f"{' · ' + str(account.get('error'))[:80] if account.get('error') else ''}</div>",
+        unsafe_allow_html=True,
+    )
 
 # ----- KPI Row -----
 equity = account["equity"]
-day_pnl = account.get("day_pnl", 0.0)
-total_pnl = account.get("total_pnl", 0.0)
+day_pnl = account.get("day_pnl")
+total_pnl = account.get("total_pnl")
 
-k1 = styles.kpi_html("EQUITY", f"${equity:,.0f}", "capital paper", "gold")
-k2_cls = "pos" if day_pnl >= 0 else "neg"
-k2_sign = "+" if day_pnl >= 0 else ""
-k2 = styles.kpi_html("P&L JOUR", f"{k2_sign}${day_pnl:,.0f}", "mark-to-market", k2_cls)
-k3_cls = "pos" if total_pnl >= 0 else "neg"
-k3_sign = "+" if total_pnl >= 0 else ""
-k3 = styles.kpi_html("P&L TOTAL", f"{k3_sign}${total_pnl:,.0f}", "depuis lancement", k3_cls)
+if equity is None:
+    # Mode démo : pas de fausses valeurs
+    k1 = styles.kpi_html("EQUITY", "—", "non connecté", "gold")
+    k2 = styles.kpi_html("P&L JOUR", "—", "non connecté")
+    k3 = styles.kpi_html("P&L TOTAL", "—", "non connecté")
+else:
+    k1 = styles.kpi_html("EQUITY", f"${equity:,.0f}", "capital paper", "gold")
+    k2_cls = "pos" if day_pnl >= 0 else "neg"
+    k2_sign = "+" if day_pnl >= 0 else ""
+    k2 = styles.kpi_html("P&L JOUR", f"{k2_sign}${day_pnl:,.0f}", "mark-to-market", k2_cls)
+    k3_cls = "pos" if total_pnl >= 0 else "neg"
+    k3_sign = "+" if total_pnl >= 0 else ""
+    k3 = styles.kpi_html("P&L TOTAL", f"{k3_sign}${total_pnl:,.0f}", "depuis lancement", k3_cls)
 k4 = styles.kpi_html(
     "POSITIONS",
     f"{len(risk_state['positions'])}",

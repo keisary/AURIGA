@@ -64,24 +64,46 @@ src/auriga/
 - `SUBMISSION_WRITEUP.md` — one-page write-up pour le jury
 - `AGENTS.md` — plan des agents de développement
 
-## Installation
+## Installation (Windows / PowerShell)
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install numpy polars pandas numba xgboost scipy scikit-learn alpaca-py streamlit python-dotenv requests pyyaml pyarrow pytest ruff
-cp .env.example .env   # remplir ALPACA_API_KEY, ALPACA_SECRET_KEY, OPENROUTER_API_KEY
+```powershell
+# 1. Cloner et entrer dans le repo
+git clone https://github.com/keisary/AURIGA.git
+cd AURIGA
+
+# 2. Environnement virtuel
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# 3. Dépendances
+python -m pip install --upgrade pip
+python -m pip install numpy polars pandas numba xgboost scipy scikit-learn alpaca-py streamlit python-dotenv requests pyyaml pyarrow pytest ruff
+
+# 4. Configuration
+copy .env.example .env
+# → remplir ALPACA_API_KEY, ALPACA_SECRET_KEY (paper), OPENROUTER_API_KEY
 ```
 
-## Usage
+> ⚠️ Si `Activate.ps1` est bloqué par la politique d'exécution :
+> `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` puis réessayer.
 
-```bash
-PYTHONPATH=src python -m auriga.orchestration.cli research   # mode recherche (A1+A2+A3)
-PYTHONPATH=src python -m auriga.orchestration.cli run        # dry-run complet par défaut
-PYTHONPATH=src python -m auriga.orchestration.cli run --no-dry-run  # ordres paper réels
-PYTHONPATH=src python -m auriga.orchestration.cli status     # état portefeuille
-PYTHONPATH=src python -m auriga.orchestration.cli dashboard  # Streamlit
-PYTHONPATH=src python -m auriga.orchestration.cli collect    # collecte données univers
+## Usage (PowerShell)
+
+```powershell
+# Depuis la racine du repo, avec le venv activé :
+$env:PYTHONPATH = "src"
+
+python -m auriga.orchestration.cli research            # mode recherche (A1+A2+A3)
+python -m auriga.orchestration.cli run                 # dry-run complet (défaut)
+python -m auriga.orchestration.cli run --no-dry-run    # ordres paper réels
+python -m auriga.orchestration.cli status              # état portefeuille
+python -m auriga.orchestration.cli dashboard           # Streamlit
+python -m auriga.orchestration.cli collect             # collecte données univers
+```
+
+Ou sans variable d'environnement (PowerShell) :
+```powershell
+python -m streamlit run src/auriga/dashboard/app.py    # dashboard
 ```
 
 ## Tests
