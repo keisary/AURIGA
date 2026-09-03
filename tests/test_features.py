@@ -40,7 +40,7 @@ def _ohlcv(n: int = 3000, seed: int = 0) -> pl.DataFrame:
 
 def test_engine_produces_all_columns():
     """Le DataFrame de sortie doit contenir toutes les colonnes du registre."""
-    
+
     ohlcv = _ohlcv(3000)
     df = compute_features(ohlcv, "1H")
     assert df.height == ohlcv.height
@@ -51,7 +51,7 @@ def test_engine_produces_all_columns():
 
 def test_engine_no_inf():
     """Aucune valeur infinie dans les features."""
-    
+
     ohlcv = _ohlcv(2000)
     df = compute_features(ohlcv, "1H")
     for name in FEATURE_NAMES:
@@ -60,14 +60,14 @@ def test_engine_no_inf():
 
 
 def test_engine_same_rows_as_input():
-    
+
     ohlcv = _ohlcv(500)
     df = compute_features(ohlcv, "1H")
     assert df.height == ohlcv.height
 
 
 def test_engine_timeframe_1d():
-    
+
     ohlcv = _ohlcv(800)
     df = compute_features(ohlcv, "1D")
     assert df.height == ohlcv.height

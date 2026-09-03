@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -123,7 +123,7 @@ class NarrativeGenerator:
         """Template factuel (sans LLM) — utilisé si API indisponible."""
         pf = facts.portfolio
         lines = [
-            f"# Rapport AURIGA — {facts.date or datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+            f"# Rapport AURIGA — {facts.date or datetime.now(UTC).strftime('%Y-%m-%d')}",
             "",
             "## Résumé du jour (mode dégradé : narratif LLM indisponible)",
             f"- Capital : {pf.get('equity', 0):,.0f} $ | Cash : {pf.get('cash', 0):,.0f} $",
@@ -154,7 +154,7 @@ class NarrativeGenerator:
             output_dir = Path(cfg.storage.get("narratives", "outputs/narratives"))
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        date = datetime.now(timezone.utc).strftime("%Y%m%d")
+        date = datetime.now(UTC).strftime("%Y%m%d")
         path = output_dir / f"report_{date}.md"
         path.write_text(text, encoding="utf-8")
         logger.info("Narratif sauvegardé: %s", path)

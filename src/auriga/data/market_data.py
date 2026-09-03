@@ -19,13 +19,10 @@ Toutes les fonctions retournent des polars.DataFrame avec la colonne
 from __future__ import annotations
 
 import logging
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import numpy as np
 import polars as pl
-from alpaca.data.enums import DataFeed
 from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
 from alpaca.data.requests import (
     OptionChainRequest,
@@ -91,9 +88,9 @@ class MarketDataClient:
         """
         if start is None:
             years = get_config().research.get("history_years", 5)
-            start = datetime.now(timezone.utc) - timedelta(days=365 * years)
+            start = datetime.now(UTC) - timedelta(days=365 * years)
         if end is None:
-            end = datetime.now(timezone.utc)
+            end = datetime.now(UTC)
 
         if use_cache and has_cached_bars(symbol, timeframe):
             cached = load_cached_bars(symbol, timeframe)
@@ -123,7 +120,7 @@ class MarketDataClient:
     # ------------------------------------------------------------------
     def get_recent_bars(self, symbol: str, timeframe: str = "1H", n: int = 500) -> pl.DataFrame:
         """Les n dernières barres (pour évaluer les signaux à l'instant T)."""
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         if timeframe == "1H":
             start = end - timedelta(hours=n * 2)  # marge pour les jours sans trading
         else:
@@ -169,7 +166,7 @@ class MarketDataClient:
                 return cached
 
         # 1. Chaîne de contrats d'options pour le symbole (OptionChainRequest)
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
         chain_req = OptionChainRequest(
             underlying_symbol=symbol,
             expiration_date_gte=(today + timedelta(days=min_dte)).isoformat(),

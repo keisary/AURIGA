@@ -64,15 +64,14 @@ def cmd_status(args) -> int:
     positions = state.read_positions()
     cycles = state.read_cycles(limit=5)
 
-    print(f"=== AURIGA STATUS ===")
+    print("=== AURIGA STATUS ===")
     print(f"Positions suivies : {len(positions)}")
     for p in positions:
         print(f"  - {p.symbol} {p.direction} ({p.strategy_name}) "
               f"risque ${p.max_risk:,.0f} qty={p.qty} ouverte {p.opened_at[:10]}")
-    print(f"\nDerniers cycles :")
+    print("\nDerniers cycles :")
     for c in reversed(cycles):
         mode = c.get("mode", "?")
-        cand = c.get("candidats_total", c.get("signaux_declenches", "?"))
         print(f"  - {c.get('timestamp', '?')[:19]} [{mode}] {c}")
     return 0
 

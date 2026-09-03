@@ -95,7 +95,6 @@ def build_labels_from_frame(
         feature_names = [f for f in feature_names if f in feature_frame.columns]
 
     X = feature_frame.select(feature_names).to_numpy().astype(np.float32)
-    n = X.shape[0]
 
     valid = ~np.isnan(y)
     # Lignes où une feature est NaN (warmup des fenêtres roulantes) → invalides

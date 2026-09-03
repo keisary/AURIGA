@@ -25,7 +25,6 @@ from auriga.data.cache import (
     save_cached_chain,
 )
 
-
 # ---------------------------------------------------------------------------
 # Cache (pas de réseau)
 # ---------------------------------------------------------------------------
@@ -100,7 +99,6 @@ def test_market_data_client_credentials_handling():
 
 
 def test_market_data_client_methods_exist():
-    from unittest.mock import MagicMock
 
     from auriga.data.market_data import MarketDataClient
 

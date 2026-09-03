@@ -11,12 +11,10 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
-from auriga.utils.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +47,7 @@ class TrackedPosition:
         }
 
     @staticmethod
-    def from_dict(d: dict[str, Any]) -> "TrackedPosition":
+    def from_dict(d: dict[str, Any]) -> TrackedPosition:
         return TrackedPosition(
             symbol=d["symbol"], einher_id=d["einher_id"], direction=d["direction"],
             strategy_name=d.get("strategy_name", ""), option_symbols=d.get("option_symbols", []),
@@ -62,7 +60,6 @@ class StateStore:
     """Journal JSONL des événements + positions suivies."""
 
     def __init__(self, state_dir: Path | str | None = None):
-        cfg = get_config()
         if state_dir is None:
             state_dir = Path("outputs/state")
         self.state_dir = Path(state_dir)
@@ -75,7 +72,7 @@ class StateStore:
     def log_cycle(self, summary: dict[str, Any]) -> None:
         """Journalise un cycle (recherche/exécution)."""
         record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
             **summary,
         }
         with open(self.cycles_file, "a", encoding="utf-8") as f:
@@ -125,7 +122,7 @@ class StateStore:
     # ------------------------------------------------------------------
     def save_spots(self, spots: dict[str, float]) -> None:
         """Sauvegarde les derniers prix spot."""
-        record = {"timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), "spots": spots}
+        record = {"timestamp": datetime.now(UTC).isoformat(timespec="seconds"), "spots": spots}
         with open(self.spots_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 

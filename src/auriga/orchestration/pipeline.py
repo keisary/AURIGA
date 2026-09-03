@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import UTC
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
@@ -29,6 +30,9 @@ from auriga.research.runner import load_or_download
 from auriga.research.xgb_discovery import XGBConfig, discover_pool, discover_single_asset
 from auriga.utils.config import get_config
 from auriga.utils.universe import load_universe
+
+if TYPE_CHECKING:
+    from auriga.selection.sizing import Allocation  # noqa: F401 (annotation module uniquement)
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +130,7 @@ def run_research_mode(
                         logger.debug("POOL %s: skip %s (%s)", sym_key, ein.id, e)
                 if all_trades:
                     # Métriques agrégées sur l'union des trades
-                    from auriga.backtest.backtester import BacktestResult, compute_metrics
+                    from auriga.backtest.backtester import compute_metrics
 
                     agg_metrics = compute_metrics(all_trades, costs_pct=0.001)
                     import numpy as np
@@ -455,7 +459,7 @@ def run_trading_mode(
                     einher_id=_sig.einher.id if _sig is not None else f"prime_{spread.name}",
                     direction=_sig.einher.direction if _sig is not None else "SELL_PRIME",
                     strategy_name=spread.name,
-                    option_symbols=[l.option_symbol for l in spread.legs],
+                    option_symbols=[leg.option_symbol for leg in spread.legs],
                     max_risk=spread.max_risk,
                     qty=qty,
                     opened_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
@@ -607,9 +611,9 @@ def _qty_for_weight(spread, equity: float, max_risk_usd: float = 2500) -> int:
 
 
 def _today() -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def run_full(

@@ -25,7 +25,7 @@ import numpy as np
 from auriga.research.condition_tree import path_to_ast, simplify_ast
 from auriga.research.labels import LabeledData, split_temporal
 from auriga.research.path_extractor import extract_paths
-from auriga.types import Condition, ConditionNode, Einher, EinherMetrics
+from auriga.types import Einher, EinherMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +277,7 @@ def discover_pool(
     einhers = build_einhers_from_model(
         model, backend, data, symbol="POOL", horizon_bars=horizon_bars,
         horizon_label=horizon_label, max_paths=max_paths,
-        source=f"xgboost:pool",
+        source="xgboost:pool",
     )
     logger.info(
         "XGB POOL H=%d: train=%d val=%d, %d einhers candidats",

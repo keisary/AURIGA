@@ -64,7 +64,6 @@ def build_occ(root: str, expiry: str, option_type: str, strike: float) -> str:
 
 def days_to_expiry(expiry: str, ref: datetime | None = None) -> int:
     """Jours jusqu'à l'expiration (DTE)."""
-    from datetime import date
 
     if ref is None:
         ref = datetime.now()

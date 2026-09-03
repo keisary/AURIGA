@@ -125,7 +125,6 @@ def compute_features(ohlcv: pl.DataFrame, timeframe: str = "1H") -> pl.DataFrame
     lows = ohlcv["low"].to_numpy().astype(np.float64)
     vols = ohlcv["volume"].to_numpy().astype(np.float64)
     n = len(closes)
-    n_hours = 1 if timeframe == "1H" else 24
 
     # Rendements simples (NaN sur la 1ère ligne)
     rets = np.full(n, np.nan, dtype=np.float64)

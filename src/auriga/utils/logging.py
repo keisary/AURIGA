@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from datetime import UTC
 from pathlib import Path
 
 
@@ -26,6 +27,6 @@ def setup_logging(level: str = "INFO", log_dir: Path | str | None = None) -> log
 
 def now_iso() -> str:
     """Timestamp ISO pour les logs et IDs."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")

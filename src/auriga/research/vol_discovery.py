@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -36,7 +35,6 @@ def build_vol_labeled(
     vol_window: int = 20,
 ) -> LabeledData:
     """Construit un LabeledData dont le label est Y_vol (vol future signée)."""
-    from auriga.research.labels import build_labels_from_frame
 
     close = ohlcv["close"].to_numpy().astype(np.float64)
     y_vol = build_vol_future(close, horizon_bars, vol_window=vol_window)
@@ -47,7 +45,6 @@ def build_vol_labeled(
         feature_names = [f for f in feature_names if f in feature_frame.columns]
 
     X = feature_frame.select(feature_names).to_numpy().astype(np.float32)
-    n = X.shape[0]
 
     valid = ~np.isnan(y_vol)
     finite_ratio = np.isfinite(X).mean(axis=1)

@@ -15,10 +15,9 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from auriga.types import (
-    OrderRequest,
     OrderResult,
     PortfolioState,
     PositionState,
@@ -172,7 +171,7 @@ class ExecutionClient:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 _client: ExecutionClient | None = None

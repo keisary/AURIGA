@@ -13,10 +13,8 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Optional
-
+from datetime import UTC, datetime
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Conditions (règles explicables)
@@ -39,8 +37,8 @@ class ConditionNode:
     """Nœud de combinaison logique AND/OR."""
 
     op: str  # "AND" | "OR"
-    left: "Condition | ConditionNode"
-    right: "Condition | ConditionNode"
+    left: Condition | ConditionNode
+    right: Condition | ConditionNode
 
     def __str__(self) -> str:
         return f"({self.left} {self.op} {self.right})"
@@ -50,7 +48,7 @@ class ConditionNode:
 # Sérialisation structurelle des conditions (pour persistance/rechargement)
 # ---------------------------------------------------------------------------
 
-def condition_to_dict(cond: "Condition | ConditionNode") -> dict[str, Any]:
+def condition_to_dict(cond: Condition | ConditionNode) -> dict[str, Any]:
     """Sérialise une condition en dict JSON reconstruisible."""
     if isinstance(cond, Condition):
         return {
@@ -67,7 +65,7 @@ def condition_to_dict(cond: "Condition | ConditionNode") -> dict[str, Any]:
     }
 
 
-def condition_from_dict(d: dict[str, Any]) -> "Condition | ConditionNode":
+def condition_from_dict(d: dict[str, Any]) -> Condition | ConditionNode:
     """Reconstruit une condition depuis un dict produit par condition_to_dict."""
     if d.get("type") == "atom":
         return Condition(
@@ -125,7 +123,7 @@ class Einher:
     """Stratégie de trading : condition + direction + amplitude + univers + métriques."""
 
     id: str
-    condition: "Condition | ConditionNode"
+    condition: Condition | ConditionNode
     direction: str  # "LONG" | "SHORT"
     amplitude: float  # retour cible attendu (fraction)
     symbol: str  # actif unique pour AURIGA
@@ -134,7 +132,7 @@ class Einher:
     source: str  # "xgboost" | "stgp" | ...
     metrics: EinherMetrics = field(default_factory=EinherMetrics)
     created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
+        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
     )
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -235,7 +233,7 @@ class SpreadStrategy:
         return {
             "symbol": self.underlying,
             "name": self.name,
-            "legs": [vars(l) for l in self.legs],
+            "legs": [vars(leg) for leg in self.legs],
             "max_risk": round(self.max_risk, 2),
             "max_profit": round(self.max_profit, 2),
             "debit_or_credit": round(self.debit_or_credit, 2),
@@ -256,8 +254,8 @@ class OrderRequest:
     strategy: SpreadStrategy
     order_type: str = "market"  # market | limit
     time_in_force: str = "day"
-    take_profit: Optional[float] = None  # en $ (prix cible de sortie)
-    stop_loss: Optional[float] = None  # en $ (prix stop)
+    take_profit: float | None = None  # en $ (prix cible de sortie)
+    stop_loss: float | None = None  # en $ (prix stop)
 
 
 @dataclass
@@ -300,7 +298,7 @@ class PortfolioState:
     day_pnl: float = 0.0
     total_pnl: float = 0.0
     updated_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
+        default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds")
     )
 
     @property

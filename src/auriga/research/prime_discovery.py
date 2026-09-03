@@ -74,7 +74,6 @@ def _train_classifier(X_tr, y_tr, X_va, y_va, config: XGBConfig):
         return model, "classifier"
     except Exception:
         # Fallback : régresseur sur le P&L court normalisé
-        from auriga.research.xgb_discovery import train_xgb
 
         model, backend, _ = train_xgb_adapt(X_tr, y_tr, X_va, y_va, config)
         return model, "regressor"

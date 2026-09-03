@@ -15,8 +15,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-import numpy as np
-
 from auriga.types import Einher, EinherMetrics
 
 logger = logging.getLogger(__name__)

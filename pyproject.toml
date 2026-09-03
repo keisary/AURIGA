@@ -36,7 +36,13 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP"]
-ignore = ["E501"]
+# N803/N806 : conventions de nommage héritées des modules portés de midasV3
+# (variables type "RSI", "MACD" dans les fonctions Numba) — non bloquant.
+ignore = ["E501", "N803", "N806"]
+
+[tool.ruff.lint.per-file-ignores]
+# app.py : sys.path hack volontaire pour lancer streamlit sans installation
+"src/auriga/dashboard/app.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

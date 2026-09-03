@@ -43,82 +43,82 @@ OPTIMAL_FLOAT = np.float32
 def _numba_hurst_rs(prices, window=252):
     """
     Hurst Exponent avec R/S analysis ROLLING (NO DATA LEAKAGE).
-    
+
     CORRECTION: Version précédente calculait UN SEUL Hurst pour tout le dataset.
     Cette version calcule Hurst sur rolling window de `window` jours.
-    
+
     Args:
         prices: Array de prix
         window: Taille fenêtre rolling (défaut 252 = 1 an trading)
-    
+
     Returns:
         Array de Hurst exponents (même taille que prices)
     """
     n = len(prices)
     hurst_array = np.full(n, 0.5, dtype=OPTIMAL_FLOAT)  # Default: random walk
-    
+
     # Scales pour R/S analysis (ajustées pour window)
     scales = np.array([10, 20, 50, min(100, window // 4)], dtype=np.int32)
-    
+
     for i in range(window, n):
         # Lookback window
         window_prices = prices[i - window : i]
-        
+
         # Calculer rendements sur window
         window_returns = np.diff(window_prices) / window_prices[:-1]
         N = len(window_returns)
-        
+
         if N < 10:
             continue
-        
+
         rs_values = np.zeros(len(scales), dtype=OPTIMAL_FLOAT)
-        
+
         # Pour chaque échelle
         for scale_idx, scale in enumerate(scales):
             if scale >= N:
                 continue
-            
+
             n_segments = N // scale
             rs_segment = np.zeros(n_segments, dtype=OPTIMAL_FLOAT)
-            
+
             for j in range(n_segments):
                 start_idx = j * scale
                 end_idx = start_idx + scale
                 segment = window_returns[start_idx:end_idx]
-                
+
                 mean_return = np.mean(segment)
                 cumulative_devs = np.cumsum(segment - mean_return)
-                
+
                 R = np.max(cumulative_devs) - np.min(cumulative_devs)
                 S = np.std(segment)
-                
+
                 if S > 0:
                     rs_segment[j] = R / S
                 else:
                     rs_segment[j] = 1.0
-            
+
             rs_values[scale_idx] = np.mean(rs_segment)
-        
+
         # Log-log regression
         valid_scales = scales[scales < N]
         valid_rs = rs_values[:len(valid_scales)]
-        
+
         if len(valid_scales) >= 2:
             log_scales = np.log(valid_scales.astype(OPTIMAL_FLOAT))
             log_rs = np.log(valid_rs)
-            
+
             # Linear regression slope = Hurst exponent
             n_points = len(log_scales)
             sum_x = np.sum(log_scales)
             sum_y = np.sum(log_rs)
             sum_xy = np.sum(log_scales * log_rs)
             sum_x2 = np.sum(log_scales * log_scales)
-            
+
             denominator = n_points * sum_x2 - sum_x * sum_x
             if abs(denominator) > 1e-10:
                 h = (n_points * sum_xy - sum_x * sum_y) / denominator
                 hurst_array[i] = max(0.0, min(1.0, h))
-    
+
     return hurst_array
 
 @njit(nopython=True, cache=True)
@@ -336,30 +336,30 @@ def _numba_kaufman_efficiency(prices, window=20):
     n = len(prices)
     if n < window:
         return np.full(n, 0.5, dtype=OPTIMAL_FLOAT)
-        
+
     er = np.zeros(n, dtype=OPTIMAL_FLOAT)
-    
+
     abs_diff = np.abs(np.diff(prices))
     abs_diff = np.concatenate((np.array([0.0], dtype=OPTIMAL_FLOAT), abs_diff))
-    
+
     for i in range(window, n):
         # Directional movement: |Price_t - Price_t-n|
         direction = np.abs(prices[i] - prices[i - window])
-        
+
         # Volatility: Sum(|Price_i - Price_i-1|)
         volatility = np.sum(abs_diff[i - window + 1 : i + 1])
-        
+
         if volatility > 1e-10:
             er[i] = direction / volatility
         else:
             er[i] = 1.0 if direction == 0 else 0.0
-            
+
     # Remplir
     for i in range(window):
         er[i] = er[window] if window < n else 0.5
-        
+
     return er
-    
+
 @njit(nopython=True, cache=True)
 def calculate_market_regime_numba(returns, volatility, window=50):
     """Régime de marché combiné ultra-rapide"""
@@ -415,7 +415,7 @@ def _numba_garch_volatility(returns, alpha=0.1, beta=0.8):
         )
 
     return volatility
-    
+
 @jit(nopython=True, cache=True)
 def _numba_autocorrelation(prices, max_lag=20, window=252):
     """
@@ -463,45 +463,45 @@ def _numba_autocorrelation(prices, max_lag=20, window=252):
 def _numba_shannon_entropy(prices, bins=50, window=252):
     """
     Entropie de Shannon ROLLING (NO DATA LEAKAGE).
-    
+
     CORRECTION: Version précédente calculait UNE entropie pour tout le dataset.
     Cette version calcule entropy sur rolling window.
-    
+
     Args:
         prices: Array de prix
         bins: Nombre de bins pour histogramme
         window: Taille fenêtre rolling (défaut 252)
-    
+
     Returns:
         Array d'entropies (même taille que prices)
     """
     n = len(prices)
     entropy_array = np.zeros(n, dtype=OPTIMAL_FLOAT)
-    
+
     for i in range(window, n):
         # Lookback window
         window_prices = prices[i - window : i]
-        
+
         if len(window_prices) < 2:
             continue
-        
+
         # Normaliser les prix
         min_val = np.min(window_prices)
         max_val = np.max(window_prices)
         if max_val == min_val:
             continue
-        
+
         # Créer les bins
         bin_width = (max_val - min_val) / bins
         hist = np.zeros(bins, dtype=OPTIMAL_FLOAT)
-        
+
         # Compter les occurrences
         for price in window_prices:
             bin_idx = int((price - min_val) / bin_width)
             if bin_idx >= bins:
                 bin_idx = bins - 1
             hist[bin_idx] += 1
-        
+
         # Calculer l'entropie
         total = len(window_prices)
         entropy = 0.0
@@ -509,9 +509,9 @@ def _numba_shannon_entropy(prices, bins=50, window=252):
             if count > 0:
                 p = count / total
                 entropy -= p * np.log2(p)
-        
+
         entropy_array[i] = entropy
-    
+
     return entropy_array
 
 @jit(nopython=True, cache=True)
@@ -602,36 +602,36 @@ def _numba_amihud_illiquidity(returns, volume, window=20):
     n = len(returns)
     if n < window:
         return np.full(n, 0.0, dtype=OPTIMAL_FLOAT)
-        
+
     illiquidity = np.zeros(n, dtype=OPTIMAL_FLOAT)
-    
+
     # Amihud = Mean( |Return| / (Price * Volume) )
     # Simplification pour compatibilité dimensionnelle: |Return| / Volume
     # Car Price * Volume = Dollar Volume, mais ici on veut l'impact par unité de volume
-    
+
     abs_returns = np.abs(returns)
-    
+
     for i in range(window - 1, n):
         window_ret = abs_returns[i - window + 1 : i + 1]
         window_vol = volume[i - window + 1 : i + 1]
-        
+
         sum_ratio = 0.0
         count = 0
-        
+
         for j in range(window):
             if window_vol[j] > 1e-5:
                 sum_ratio += window_ret[j] / window_vol[j]
                 count += 1
-                
+
         if count > 0:
             illiquidity[i] = sum_ratio / count * 1e6  # Mettre à l'échelle
         else:
             illiquidity[i] = 0.0
-            
+
     # Remplir
     for i in range(window - 1):
         illiquidity[i] = illiquidity[window - 1]
-        
+
     return illiquidity
 
 @jit(nopython=True, cache=True)
@@ -665,37 +665,37 @@ def _numba_variance_ratio(returns, lags=20):
     n = len(returns)
     if n < lags * 2:
         return np.full(n, 1.0, dtype=OPTIMAL_FLOAT)
-        
+
     vr = np.full(n, np.nan, dtype=OPTIMAL_FLOAT)  # NaN pour ffill correct en post-processing
-    
+
     # VR(q) = Var(r_q) / (q * Var(r_1))
     # Var(r_q) est la variance des rendements sur q périodes
-    
+
     for i in range(n - 1, 30, -1): # Ne pas calculer pour tout l'historique (trop lent), focus récent
         # Fenêtre locale pour "Rolling VR"
         window_size = min(i, 100)
-        if window_size < lags: 
+        if window_size < lags:
             continue
-            
+
         local_rets = returns[i - window_size + 1 : i + 1]
-        
+
         # Variance 1-période
         var_1 = np.var(local_rets)
-        
+
         # Variance q-périodes
         # Somme mobile des rendements sur lags
         sum_rets_q = np.zeros(len(local_rets) - lags + 1)
         for j in range(len(sum_rets_q)):
             sum_rets_q[j] = np.sum(local_rets[j : j + lags])
-            
+
         var_q = np.var(sum_rets_q)
-        
+
         if var_1 > 1e-10:
             vr[i] = var_q / (lags * var_1)
         else:
             vr[i] = 1.0
-            
+
     # Remplir les trous (forward fill inversé ou simple fill)
     # Numba ne supporte pas ffill simple, on laisse les 0 qui seront ffill plus tard par pandas
-    
+
     return vr

@@ -22,7 +22,6 @@ Règles validées par le SDK :
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest, OptionLegRequest

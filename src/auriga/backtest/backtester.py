@@ -18,7 +18,7 @@ import numpy as np
 import polars as pl
 
 from auriga.research.condition_tree import evaluate_ast_on_array
-from auriga.types import Condition, ConditionNode, Einher, EinherMetrics
+from auriga.types import Einher, EinherMetrics
 
 logger = logging.getLogger(__name__)
 

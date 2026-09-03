@@ -24,7 +24,6 @@ from auriga.options.occ import days_to_expiry
 from auriga.options.strategies import select_expiry
 from auriga.risk.vol_signal import VolRiskEngine
 from auriga.types import SpreadStrategy
-from auriga.utils.config import get_config
 
 logger = logging.getLogger(__name__)
 

@@ -29,7 +29,7 @@ class Config:
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, settings_path: Path | str | None = None) -> "Config":
+    def load(cls, settings_path: Path | str | None = None) -> Config:
         load_dotenv(ROOT_DIR / ".env")
         path = Path(settings_path) if settings_path else CONFIG_DIR / "settings.yaml"
         with open(path, encoding="utf-8") as f:

@@ -25,7 +25,6 @@ from auriga.data.market_data import download_universe
 from auriga.features.engine import compute_features
 from auriga.research.labels import build_labels_from_frame
 from auriga.research.xgb_discovery import (
-    DiscoveryResult,
     XGBConfig,
     discover_pool,
     discover_single_asset,

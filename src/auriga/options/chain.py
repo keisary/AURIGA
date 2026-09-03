@@ -12,6 +12,7 @@ Sortie : liste de SpreadStrategy prêtes pour l'exécution.
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 
 import polars as pl
 
@@ -44,7 +45,7 @@ def signals_from_allocation(
     spot_prices: dict[str, float],
 ) -> list[Signal]:
     """Convertit l'allocation en signaux (avec prix spot)."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     signals: list[Signal] = []
     for pos in allocation.positions:
@@ -57,7 +58,7 @@ def signals_from_allocation(
                 einher=ein,
                 symbol=ein.symbol,
                 price=spot,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
                 strength=pos.score,
             )
         )
