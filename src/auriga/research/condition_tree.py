@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
+
 from auriga.research.path_extractor import XGBPath
 from auriga.types import Condition, ConditionNode
 
