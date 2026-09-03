@@ -97,18 +97,20 @@ def run_research_mode(
 
         logger.info("  %s: %d candidats", hz_label, len(candidates))
 
-        # Backtest sur fenêtre VAL + admission simplifiée (seuils)
-        # NB: les candidats POOL (universels) ne sont backtestés que sur leur
-        # actif de référence (l'actif primary du pool) en mode rapide.
+        # Backtest sur fenêtre TRAIN+VAL (80%) pour maximiser les trades
+        # observés. Le holdout (20% final) reste VIERGE pour la validation
+        # définitive (pas de fuite). NB: backtester sur train inclut une part
+        # d'optimisme (le modèle a vu ces barres) — le holdout est la vérité.
         admitted_hz: list[Any] = []
         for ein in candidates:
             sym_key = ein.symbol if ein.symbol in labeled else next(iter(labeled.keys()))
             data = labeled.get(sym_key)
             if data is None:
                 continue
-            _, val_mask, _ = split_temporal(data, embargo_bars=max(hz, 24))
-            val_idx = [i for i, m in enumerate(val_mask) if m]
-            if len(val_idx) < 50:
+            # train_mask + val_mask = 80% ; holdout_mask = 20% (vierge)
+            train_mask, val_mask, _ = split_temporal(data, embargo_bars=max(hz, 24))
+            bt_idx = [i for i, (t, v) in enumerate(zip(train_mask, val_mask)) if t or v]
+            if len(bt_idx) < 100:
                 continue
             ohlcv_sym = bars[sym_key] if sym_key in bars else next(iter(bars.values()))
             # slice polars : les features gardent les mêmes lignes que ohlcv
@@ -117,8 +119,8 @@ def run_research_mode(
                 # Désalignement (features n'a pas toutes les lignes) → skip
                 continue
             X = data.X
-            ohlcv_val = ohlcv_sym.slice(val_idx[0], len(val_idx))
-            bt = backtest_einher(ein, ohlcv_val, X[val_idx], data.feature_names, costs_pct=0.001)
+            ohlcv_bt = ohlcv_sym.slice(bt_idx[0], len(bt_idx))
+            bt = backtest_einher(ein, ohlcv_bt, X[bt_idx], data.feature_names, costs_pct=0.001)
             m = bt.metrics
             # enrichir metrics pour le scoring
             if m.n_trades > 0:
