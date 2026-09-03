@@ -119,11 +119,12 @@ class ExecutionClient:
         qty: int = 1,
         order_type: str = "market",
     ) -> OrderResult:
-        """Soumet un spread multi-leg en ordre unique (atomic)."""
-        from auriga.execution.orders import (
-            build_multi_leg_payload,
-            validate_spread,
-        )
+        """Soumet un spread multi-leg en ordre unique (atomic).
+
+        Format officiel Alpaca (vérifié alpaca-py 0.44) : MarketOrderRequest
+        avec order_class=MLEG + legs=[OptionLegRequest(...)].
+        """
+        from auriga.execution.orders import build_multi_leg_order, validate_spread
 
         ok, reason = validate_spread(strategy)
         if not ok:
@@ -132,21 +133,8 @@ class ExecutionClient:
                 message=reason,
             )
 
-        payload = build_multi_leg_payload(strategy, qty_per_leg=qty, order_type=order_type)
         try:
-            from alpaca.trading.requests import MarketOrderRequest
-
-            # L'API alpaca-py multi-leg attend des legs explicites
-            req = MarketOrderRequest(
-                symbol=strategy.legs[0].option_symbol,
-                qty=qty,
-                side=payload["legs"][0]["side"],
-                type=payload["type"],
-                time_in_force=payload["time_in_force"],
-                order_class=payload["order_class"],
-                asset_class=payload["asset_class"],
-                legs=payload["legs"],
-            )
+            req = build_multi_leg_order(strategy, qty=qty)
             order = self._with_retry(self._client.submit_order, req)
             return OrderResult(
                 order_id=str(getattr(order, "id", "")),

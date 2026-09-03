@@ -1,93 +1,84 @@
 """AURIGA - Construction des ordres Alpaca multi-leg (options).
 
-Convertit une SpreadStrategy (types.py) en payload d'ordre Alpaca.
+Convertit une SpreadStrategy (types.py) en ordre multi-leg Alpaca.
 
-API alpaca-py (v0.44) :
-- MarketOrderRequest / LimitOrderRequest avec asset_class=US_OPTION
-- OrderClass.MLEG pour les ordres multi-leg (spreads)
-- Chaque leg : symbol (OCC), side (buy/sell), qty, order_type, time_in_force
+Format OFFICIEL (vérifié alpaca-py 0.44 + exemple officiel Alpaca) :
+    MarketOrderRequest(
+        qty=1,
+        order_class=OrderClass.MLEG,
+        time_in_force=TimeInForce.DAY,
+        legs=[
+            OptionLegRequest(symbol=<OCC>, side=OrderSide.SELL, ratio_qty=1),
+            OptionLegRequest(symbol=<OCC>, side=OrderSide.BUY, ratio_qty=1),
+        ]
+    )
 
-L'API Alpaca multi-leg s'attend à une structure de legs plate :
-  legs = [ {symbol, side, qty, type, time_in_force}, ... ]
-avec un ordre unique pour les spreads verticaux (class=MLEG).
-
-Vérifié contre le SDK installé (alpaca-py 0.44) : OrderClass.MLEG existe,
-AssetClass.US_OPTION existe, MarketOrderRequest accepte les kwargs étendus.
+Règles validées par le SDK :
+- Pas de symbol racine pour MLEG, pas d'asset_class
+- qty (racine) REQUIS pour MLEG = nombre de spreads
+- legs : 2 à 4, symboles UNIQUES, ratio_qty = quantité proportionnelle
+- side : BUY/SELL (ou position_intent buy_to_open/sell_to_open)
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from alpaca.trading.enums import AssetClass, OrderClass, OrderSide, OrderType, TimeInForce
-from alpaca.trading.requests import MarketOrderRequest
-from alpaca.trading.models import OrderRequest
+from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
+from alpaca.trading.requests import MarketOrderRequest, OptionLegRequest
 
-from auriga.types import OptionLeg, OrderRequest as AurigaOrderRequest, SpreadStrategy
+from auriga.types import OrderRequest as AurigaOrderRequest
+from auriga.types import SpreadStrategy
 
 logger = logging.getLogger(__name__)
 
 
-def build_multi_leg_payload(
+def build_multi_leg_order(
     strategy: SpreadStrategy,
-    qty_per_leg: int = 1,
-    order_type: str = "market",
-    time_in_force: str = "day",
-) -> dict[str, Any]:
-    """Construit le payload d'un ordre multi-leg Alpaca pour un spread.
+    qty: int = 1,
+) -> MarketOrderRequest:
+    """Construit l'ordre multi-leg Alpaca pour un spread.
 
     Args:
-        strategy : spread défini-risque (2 jambes)
-        qty_per_leg : nombre de contrats par jambe (défaut 1)
-        order_type : 'market' | 'limit'
-        time_in_force : 'day' | 'gtc'
+        strategy : spread défini-risque (2 jambes buy/sell)
+        qty : nombre de spreads (contrats par jambe)
 
     Returns:
-        dict compatible alpaca-py (OrderRequest multi-leg).
+        MarketOrderRequest prêt pour submit_order.
     """
-    legs_payload = []
+    # Ordre des legs : SELL d'abord puis BUY (convention spread)
+    legs = []
     for leg in strategy.legs:
-        side = OrderSide.BUY if leg.side == "buy" else OrderSide.SELL
-        legs_payload.append(
-            {
-                "symbol": leg.option_symbol,
-                "side": side,
-                "qty": qty_per_leg,
-                "type": OrderType.MARKET if order_type == "market" else OrderType.LIMIT,
-                "time_in_force": TimeInForce.DAY if time_in_force == "day" else TimeInForce.GTC,
-            }
+        side = OrderSide.SELL if leg.side == "sell" else OrderSide.BUY
+        legs.append(
+            OptionLegRequest(
+                symbol=leg.option_symbol,
+                side=side,
+                ratio_qty=qty,
+            )
         )
 
-    return {
-        "symbol": strategy.signal.symbol,  # sous-jacent (référence)
-        "qty": qty_per_leg,
-        "asset_class": AssetClass.US_OPTION,
-        "order_class": OrderClass.MLEG,
-        "type": OrderType.MARKET if order_type == "market" else OrderType.LIMIT,
-        "time_in_force": TimeInForce.DAY if time_in_force == "day" else TimeInForce.GTC,
-        "legs": legs_payload,
-    }
+    # Pour un bull call spread : buy lower strike, sell higher strike
+    # L'ordre des legs n'a pas d'importance pour Alpaca (symboles uniques)
+    req = MarketOrderRequest(
+        qty=qty,
+        order_class=OrderClass.MLEG,
+        time_in_force=TimeInForce.DAY,
+        legs=legs,
+    )
+    return req
 
 
 def build_auriga_order_payload(
     strategy: SpreadStrategy,
-    qty_per_leg: int = 1,
-    order_type: str = "market",
+    qty: int = 1,
 ) -> AurigaOrderRequest:
     """Enveloppe : SpreadStrategy → AurigaOrderRequest (prêt pour le client)."""
-    return AurigaOrderRequest(
-        strategy=strategy,
-        order_type=order_type,
-        time_in_force="day",
-    )
+    return AurigaOrderRequest(strategy=strategy)
 
 
 def validate_spread(strategy: SpreadStrategy) -> tuple[bool, str]:
-    """Valide qu'un spread est exécutable (structure minimale).
-
-    Returns:
-        (ok, raison)
-    """
+    """Valide qu'un spread est exécutable (structure minimale)."""
     if len(strategy.legs) != 2:
         return False, f"Un spread vertical doit avoir 2 jambes (ici {len(strategy.legs)})"
     sides = {leg.side for leg in strategy.legs}
@@ -96,6 +87,9 @@ def validate_spread(strategy: SpreadStrategy) -> tuple[bool, str]:
     expiries = {leg.expiry for leg in strategy.legs}
     if len(expiries) != 1:
         return False, "Les 2 jambes doivent avoir la MÊME expiration"
+    symbols = {leg.option_symbol for leg in strategy.legs}
+    if len(symbols) != 2:
+        return False, "Les 2 jambes doivent avoir des symboles OCC DIFFÉRENTS"
     if strategy.max_risk <= 0:
         return False, f"max_risk doit être > 0 (ici {strategy.max_risk})"
     return True, ""
