@@ -1,5 +1,7 @@
 # AURIGA — Autonomous Quant Research & Investment Agent
 
+![AURIGA](assets/auriga_banner.png)
+
 Agent autonome de recherche quantitative et de trading pour le **Hackathon Alpaca AI Trading Agents 2026**.
 
 AURIGA combine **deux moteurs de stratégies** (direction + vente de prime) et **un signal de risque** (volatilité) en un système cohérent qui découvre, valide et exécute des **spreads d'options définis-risque** sur un **compte paper Alpaca ($100k)** — avec narratif quotidien LLM et dashboard Streamlit.
@@ -59,9 +61,10 @@ src/auriga/
 
 ## Documentation
 
-- `CAHIER_DES_CHARGES_AURIGA.md` — SRS complet (ISO/IEC/IEEE 29148), décisions D1-D15
+- `CAHIER_DES_CHARGES_AURIGA.md` — SRS complet (ISO/IEC/IEEE 29148), décisions D1-D17
 - `DESIGN_RATIONALE.md` — chaque choix de conception, sourcé (Ilmanen 2012, AQR, arXiv...)
 - `SUBMISSION_WRITEUP.md` — one-page write-up pour le jury
+- `SUBMISSION_KIT.md` — kit de soumission (champs LabLab, script vidéo, checklist)
 - `AGENTS.md` — plan des agents de développement
 
 ## Installation (Windows / PowerShell)
