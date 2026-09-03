@@ -15,8 +15,10 @@ outputs/corpus/
 outputs/archive/
 outputs/narratives/
 outputs/logs/
+outputs/models/
 *.jsonl
 !config/*.jsonl
+!outputs/research/*.jsonl
 
 # Python
 __pycache__/
