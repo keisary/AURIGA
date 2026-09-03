@@ -102,9 +102,48 @@ def run_research_mode(
         # définitive (pas de fuite). NB: backtester sur train inclut une part
         # d'optimisme (le modèle a vu ces barres) — le holdout est la vérité.
         backtested: list[Any] = []
+        # Raccourci : si le candidat POOL, on le backteste sur CHAQUE actif du
+        # pool (ses features n'ont PAS asset_id — c'est le X d'un actif seul)
+        # et on agglomère les trades (l'Einher POOL est universel).
         for ein in candidates:
-            sym_key = ein.symbol if ein.symbol in labeled else next(iter(labeled.keys()))
-            data = labeled.get(sym_key)
+            if ein.symbol == "POOL":
+                all_trades: list[Any] = []
+                for sym_key, data in labeled.items():
+                    train_mask, val_mask, _ = split_temporal(data, embargo_bars=max(hz, 24))
+                    bt_idx = [i for i, (t, v) in enumerate(zip(train_mask, val_mask)) if t or v]
+                    if len(bt_idx) < 100:
+                        continue
+                    ohlcv_sym = bars.get(sym_key)
+                    if ohlcv_sym is None or len(ohlcv_sym) != data.X.shape[0]:
+                        continue
+                    try:
+                        bt = backtest_einher(
+                            ein, ohlcv_sym.slice(bt_idx[0], len(bt_idx)),
+                            data.X[bt_idx], data.feature_names, costs_pct=0.001,
+                        )
+                        all_trades.extend(bt.trades)
+                    except Exception as e:
+                        logger.debug("POOL %s: skip %s (%s)", sym_key, ein.id, e)
+                if all_trades:
+                    # Métriques agrégées sur l'union des trades
+                    from auriga.backtest.backtester import BacktestResult, compute_metrics
+
+                    agg_metrics = compute_metrics(all_trades, costs_pct=0.001)
+                    import numpy as np
+
+                    rets = np.array([t.net_return for t in all_trades])
+                    ein = ein.__class__(**{**ein.__dict__, "metrics": agg_metrics.__class__(**{
+                        **agg_metrics.__dict__, "extra": {
+                            **agg_metrics.extra,
+                            "avg_gain": float(rets[rets > 0].mean()) if (rets > 0).any() else 0.0,
+                            "avg_loss": float(abs(rets[rets < 0].mean())) if (rets < 0).any() else 0.0,
+                        }
+                    })})
+                    backtested.append(ein)
+                continue
+
+            # Candidat spécifique à un actif
+            data = labeled.get(ein.symbol)
             if data is None:
                 continue
             # train_mask + val_mask = 80% ; holdout_mask = 20% (vierge)
@@ -112,10 +151,10 @@ def run_research_mode(
             bt_idx = [i for i, (t, v) in enumerate(zip(train_mask, val_mask)) if t or v]
             if len(bt_idx) < 100:
                 continue
-            ohlcv_sym = bars[sym_key] if sym_key in bars else next(iter(bars.values()))
+            ohlcv_sym = bars.get(ein.symbol)
             # slice polars : les features gardent les mêmes lignes que ohlcv
             # (compute_features conserve le nombre de lignes)
-            if len(ohlcv_sym) != data.X.shape[0]:
+            if ohlcv_sym is None or len(ohlcv_sym) != data.X.shape[0]:
                 # Désalignement (features n'a pas toutes les lignes) → skip
                 continue
             X = data.X

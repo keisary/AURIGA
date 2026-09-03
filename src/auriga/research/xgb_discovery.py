@@ -164,6 +164,12 @@ def build_einhers_from_model(
     for p in paths:
         if abs(p.score) < min_abs_score:
             continue
+        # Filtre POOL : une règle universelle ne doit PAS référencer asset_id
+        # (inutilisable en inference sur un actif seul — on ne connaît pas
+        # l'asset_id au moment du signal). On ne garde que les règles sur les
+        # features communes.
+        if any(feat == "asset_id" for feat, _, _ in p.conditions):
+            continue
         direction = "LONG" if p.score > 0 else "SHORT"
 
         try:
