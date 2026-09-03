@@ -1,18 +1,22 @@
 """AURIGA - Backtest des stratégies d'options (vol & vente de prime).
 
-Contexte : Alpaca ne fournit pas de prix d'options historiques. On estime le
-P&L des stratégies d'options en repricant via Black-Scholes à l'entrée ET à
-la sortie, avec la vol RÉALISÉE de la fenêtre comme proxy de la vol future.
+Contexte : Alpaca ne fournit pas de prix d'options historiques gratuits. On
+estime le P&L en repricant via Black-Scholes avec la vol RÉALISÉE.
 
-Stratégies simulées :
-- LONG STRADDLE (Agent A2 VOL_UP) : achat call + put ATM, profit si |mouvement|
-  > prime payée (la vol réalisée dépasse la vol implicite payée).
-- SHORT STRADDLE / CREDIT SPREAD (Agent A3) : vente, profit du theta si le
-  sous-jacent ne bouge pas trop.
+CORRECTION 2026-09-03 (revue Jovanny) :
+- La vol réalisée midasV3 est PER-BARRE (sqrt(sum(r²))), PAS annualisée.
+  black_scholes exige une vol ANNUALISÉE. On annualise : vol_ann = vol_per_bar
+  × sqrt(bars_per_year).
+- Anti-tautologie : le P&L d'un straddle dépend du MOUVEMENT du spot entre
+  entrée et sortie (pas seulement de la vol du label). À l'échéance simulée,
+  le straddle vaut |S_T − K| (intrinsèque) — le P&L mesure si le spot a bougé
+  plus que la prime payée.
 
-Simplification honnête : à l'entrée, on paie la vol implicite (IV ~ RV
-historique + prime) ; à la sortie (H barres plus tard), on repricie avec la
-vol réalisée de la fenêtre écoulée. Le P&L = différence de prix × 100.
+Méthode (straddle ATM détenu jusqu'à l'échéance simulée = horizon) :
+1. Signaux = condition vraie → entrée à t+1.
+2. Prime straddle = BS(call ATM) + BS(put ATM) avec vol_ann = vol_per_bar × √N.
+3. Sortie à t+H : valeur intrinsèque = |S_{t+H} − K| × 100 (échéance).
+4. P&L long straddle = intrinsèque − prime. P&L short = prime − intrinsèque.
 """
 from __future__ import annotations
 
@@ -28,9 +32,12 @@ from auriga.types import Einher, EinherMetrics
 
 logger = logging.getLogger(__name__)
 
-ATM_STRIKE_MULT = 1.00  # strike ATM = spot
-IV_BUMP = 0.05  # vol implicite = vol réalisée + 5pts (variance risk premium)
-MULTIPLIER = 100  # contrat = 100 actions
+ATM_STRIKE_MULT = 1.00
+MULTIPLIER = 100
+BARS_PER_YEAR = 252 * 24  # 1H → ~6048 barres/an
+# Prime de risque de vol (IV > RV) : les acheteurs paient plus que la vol
+# réalisée. On majore la vol réalisée de VOL_RISK_PREMIUM points annualisés.
+VOL_RISK_PREMIUM = 0.04  # 4 points de vol annualisée
 
 
 @dataclass
@@ -39,26 +46,31 @@ class OptionTrade:
 
     entry_idx: int
     exit_idx: int
-    direction: str  # VOL_UP | VOL_DOWN
-    entry_price: float  # coût total straddle (ou crédit reçu)
-    exit_price: float
-    net_return: float  # P&L / capital engagé (approx)
-    exit_reason: str  # 'expiry' | 'timeout'
+    direction: str  # VOL_UP (long) | VOL_DOWN (short)
+    entry_price: float  # prime totale payée/reçue ($ pour 1 contrat)
+    exit_price: float  # valeur à la sortie ($)
+    net_return: float  # P&L / prime engagée
+    exit_reason: str = "expiry"
 
 
-def _estimate_vol(close: np.ndarray, window: int = 20) -> np.ndarray:
-    """Vol réalisée annualisée approximée sur fenêtre glissante."""
+def _vol_per_bar(close: np.ndarray, window: int = 20) -> np.ndarray:
+    """Vol réalisée PER-BARRE (identique à la feature realized_vol_20)."""
     from auriga.features.quantitative import _numba_realized_volatility
 
     rets = np.full(len(close), np.nan, dtype=np.float64)
     if len(close) > 1:
         rets[1:] = close[1:] / close[:-1] - 1.0
-    rv = np.asarray(_numba_realized_volatility(rets, window), dtype=np.float64)
-    # RV par barre ~ sqrt(252*24) pour annualiser (1H) — ici on garde per-bar
-    return rv
+    return np.asarray(_numba_realized_volatility(rets, window), dtype=np.float64)
 
 
-def backtest_vol_einher(
+def _vol_annualized(vol_per_bar: float) -> float:
+    """Annualise une vol per-barre."""
+    if vol_per_bar is None or np.isnan(vol_per_bar) or vol_per_bar <= 0:
+        return 0.0
+    return float(vol_per_bar * np.sqrt(BARS_PER_YEAR))
+
+
+def backtest_straddle_einher(
     einher: Einher,
     ohlcv: pl.DataFrame,
     X: np.ndarray,
@@ -66,13 +78,14 @@ def backtest_vol_einher(
     costs_pct: float = 0.001,
     vol_window: int = 20,
 ) -> tuple[list[OptionTrade], EinherMetrics]:
-    """Backtest un Einher VOL (straddle long si VOL_UP, short si VOL_DOWN).
+    """Backtest un Einher VOL via straddle ATM détenu jusqu'à l'échéance.
 
-    Méthode :
-    1. Signaux = où la condition est vraie.
-    2. À l'entrée (t+1) : prix straddle ATM avec vol_impl = RV_t + bump.
-    3. À la sortie (t+1+H) : reprice avec vol réalisée de [t, t+H].
-    4. P&L straddle long ≈ (prix_sortie − prix_entrée) × 2 legs × 100.
+    - direction VOL_UP   → LONG straddle (parie que le spot bouge beaucoup)
+    - direction VOL_DOWN → SHORT straddle (parie que le spot reste range)
+
+    L'échéance simulée = horizon de la règle. À l'échéance, le straddle vaut
+    |S_T − K| (intrinsèque, valeur temps = 0). Le P&L mesure si le mouvement
+    du spot a dépassé la prime payée (vol implicite = vol réalisée + prime).
     """
     n = X.shape[0]
     if n < 50:
@@ -82,7 +95,7 @@ def backtest_vol_einher(
     signal_idx = np.where(signal_mask)[0]
 
     close = ohlcv["close"].to_numpy().astype(np.float64)
-    rv = _estimate_vol(close, vol_window)
+    vol_pb = _vol_per_bar(close, vol_window)
     horizon = einher.horizon_bars if einher.horizon_bars > 0 else 24
 
     trades: list[OptionTrade] = []
@@ -93,54 +106,39 @@ def backtest_vol_einher(
             continue
         entry_idx = t + 1
         S0 = close[t]
-        if S0 <= 0 or np.isnan(rv[t]) or rv[t] <= 0:
+        vol_ann_entry = _vol_annualized(vol_pb[t])
+        if S0 <= 0 or vol_ann_entry <= 0:
             continue
 
-        # Vol implicite à l'entrée = vol réalisée + prime de risque
-        iv_entry = min(rv[t] + IV_BUMP, 1.5)
-        # Vol réalisée sur la fenêtre de détention (sortie)
-        window_rets = close[t : t + horizon + 1]
-        if len(window_rets) < 2:
-            continue
-        rv_exit = np.std(np.diff(window_rets) / window_rets[:-1]) * np.sqrt(1)  # per-bar
+        # Temps jusqu'à l'échéance simulée (en années)
+        T = horizon / BARS_PER_YEAR
+        K = S0 * ATM_STRIKE_MULT
 
-        # Temps restant (en années, approximation 1H → 1/(252*24))
-        T_entry = max(horizon / (252 * 24), 1e-4)
+        # Prime straddle = call ATM + put ATM (vol implicite = RV + prime risque)
+        iv = min(vol_ann_entry + VOL_RISK_PREMIUM, 3.0)
+        call_p = black_scholes(S0, K, T, sigma=iv, option_type="call").price
+        put_p = black_scholes(S0, K, T, sigma=iv, option_type="put").price
+        straddle_prime = (call_p + put_p) * MULTIPLIER  # $ pour 1 contrat
 
-        # Prix straddle ATM à l'entrée (2 legs)
-        call_entry = black_scholes(S0, S0 * ATM_STRIKE_MULT, T_entry, sigma=iv_entry, option_type="call").price
-        put_entry = black_scholes(S0, S0 * ATM_STRIKE_MULT, T_entry, sigma=iv_entry, option_type="put").price
-        straddle_entry = (call_entry + put_entry) * MULTIPLIER
-
-        # Prix à la sortie : sous-jacent à S_exit, vol réalisée, temps ≈ 0
-        S_exit = close[min(t + horizon, n - 1)]
-        iv_exit = max(rv_exit, 0.01)
-        T_exit = max((horizon - (t + horizon - entry_idx)) / (252 * 24), 1e-6)
-        # Pour un straddle, à l'échéance le prix ≈ |S-K| (intrinsèque)
-        # On reprice avec vol résiduelle petite (on est proche de l'échéance)
-        call_exit = black_scholes(S_exit, S0 * ATM_STRIKE_MULT, T_exit, sigma=iv_exit, option_type="call").price
-        put_exit = black_scholes(S_exit, S0 * ATM_STRIKE_MULT, T_exit, sigma=iv_exit, option_type="put").price
-        straddle_exit = (call_exit + put_exit) * MULTIPLIER
+        # Sortie à l'échéance : valeur intrinsèque = |S_T − K| × 100
+        S_T = close[min(entry_idx + horizon, n - 1)]
+        intrinsic = abs(S_T - K) * MULTIPLIER
 
         if einher.direction == "VOL_UP":
-            # Long straddle : profit si le straddle a pris de la valeur
-            gross = straddle_exit - straddle_entry
-            capital = straddle_entry
+            gross = intrinsic - straddle_prime
         else:
-            # Short straddle : profit si le straddle a perdu de la valeur
-            gross = straddle_entry - straddle_exit
-            capital = straddle_entry
+            gross = straddle_prime - intrinsic
 
-        net_ret = gross / max(capital, 1.0) - costs_pct
+        net_ret = gross / max(straddle_prime, 1.0) - costs_pct
+
         trades.append(
             OptionTrade(
                 entry_idx=entry_idx,
                 exit_idx=entry_idx + horizon,
                 direction=einher.direction,
-                entry_price=straddle_entry,
-                exit_price=straddle_exit,
+                entry_price=straddle_prime,
+                exit_price=intrinsic,
                 net_return=net_ret,
-                exit_reason="timeout",
             )
         )
         next_free = entry_idx + horizon
@@ -150,15 +148,13 @@ def backtest_vol_einher(
 
 
 def _metrics_from_option_trades(trades: list[OptionTrade], costs_pct: float) -> EinherMetrics:
-    """Métriques depuis les trades d'options (mêmes formules que le backtester)."""
-    from auriga.backtest.backtester import compute_metrics
-    from auriga.backtest.backtester import TradeResult
+    """Métriques depuis les trades d'options (réutilise compute_metrics)."""
+    from auriga.backtest.backtester import TradeResult, compute_metrics
 
-    # Convertir en TradeResult pour réutiliser compute_metrics
     converted = [
         TradeResult(
             entry_idx=tr.entry_idx, exit_idx=tr.exit_idx,
-            direction="LONG" if tr.net_return >= 0 else "SHORT",
+            direction="LONG" if tr.direction == "VOL_UP" else "SHORT",
             entry_price=tr.entry_price, exit_price=tr.exit_price,
             net_return=tr.net_return, exit_reason=tr.exit_reason,
             n_bars_held=tr.exit_idx - tr.entry_idx,
