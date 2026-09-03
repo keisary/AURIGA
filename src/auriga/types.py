@@ -47,6 +47,42 @@ class ConditionNode:
 
 
 # ---------------------------------------------------------------------------
+# Sérialisation structurelle des conditions (pour persistance/rechargement)
+# ---------------------------------------------------------------------------
+
+def condition_to_dict(cond: "Condition | ConditionNode") -> dict[str, Any]:
+    """Sérialise une condition en dict JSON reconstruisible."""
+    if isinstance(cond, Condition):
+        return {
+            "type": "atom",
+            "feature_ref": cond.feature_ref,
+            "operator": cond.operator,
+            "value": cond.value,
+        }
+    return {
+        "type": "node",
+        "op": cond.op,
+        "left": condition_to_dict(cond.left),
+        "right": condition_to_dict(cond.right),
+    }
+
+
+def condition_from_dict(d: dict[str, Any]) -> "Condition | ConditionNode":
+    """Reconstruit une condition depuis un dict produit par condition_to_dict."""
+    if d.get("type") == "atom":
+        return Condition(
+            feature_ref=d["feature_ref"],
+            operator=d["operator"],
+            value=float(d["value"]),
+        )
+    return ConditionNode(
+        op=d["op"],
+        left=condition_from_dict(d["left"]),
+        right=condition_from_dict(d["right"]),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Métriques
 # ---------------------------------------------------------------------------
 
