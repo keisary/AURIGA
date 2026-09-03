@@ -78,6 +78,15 @@ narrative:
   max_tokens: 1500
   temperature: 0.4
 
+# --- Vente de prime (Agent A3) ---
+prime:
+  enabled: true
+  max_per_cycle: 8          # max credit spreads par cycle
+  spread_pct: 0.05          # largeur du spread (5% du spot)
+  otm_pct: 0.03             # strike vendu à 3% OTM
+  min_credit_usd: 0.15      # crédit minimum par contrat
+  enable_call_spreads: false  # put spreads par défaut (biais haussier)
+
 # --- Orchestration (REQ-F-ORC) ---
 orchestration:
   cycle_frequency: "daily"     # quotidien pour le hackathon

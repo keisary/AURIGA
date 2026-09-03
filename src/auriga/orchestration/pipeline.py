@@ -384,8 +384,8 @@ def run_trading_mode(
     # 5. Vente de prime A3 (credit spreads systématiques) + filtres risque
     risk_events: list[dict] = []
     spreads_prime: list[Any] = []
-    prime_enabled = cfg.orchestration.get("enable_prime_selling", True)
-    if prime_enabled and not cfg.raw.get("prime", {}).get("disabled", False):
+    prime_enabled = cfg.raw.get("prime", {}).get("enabled", True)
+    if prime_enabled:
         from auriga.research.prime_seller import (
             AvoidSellFilter,
             PrimeSellerConfig,
