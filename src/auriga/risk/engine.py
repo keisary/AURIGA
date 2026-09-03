@@ -55,11 +55,39 @@ def default_risk_config() -> RiskConfig:
 
 
 class RiskEngine:
-    """Évalue les ordres/spreads contre les risk gates."""
+    """Évalue les ordres/spreads contre les risk gates.
+
+    Gates de base (config) + extra_checks : fonctions de gate additionnelles
+    fournies par les agents (vol_signal, AVOID_SELL). Chaque fonction a la
+    signature (spread) -> (ok: bool, raison: str).
+    """
 
     def __init__(self, config: RiskConfig | None = None):
         self.config = config or default_risk_config()
         self._universe = load_universe()
+        self.extra_checks: list = []  # [(fn, label), ...]
+
+    def add_check(self, fn, label: str) -> None:
+        """Ajoute une gate externe (ex: vol_danger, avoid_sell)."""
+        self.extra_checks.append((fn, label))
+
+    # ------------------------------------------------------------------
+    def _run_extra_checks(self, spread: SpreadStrategy) -> tuple[list[str], list[str]]:
+        """Exécute les gates externes. Retourne (raisons, bloquants)."""
+        reasons: list[str] = []
+        blocked: list[str] = []
+        for fn, label in self.extra_checks:
+            try:
+                ok, detail = fn(spread)
+                if ok:
+                    reasons.append(f"{label}_ok")
+                else:
+                    blocked.append(f"{label}: {detail}")
+            except Exception as e:
+                # Une gate externe qui échoue ne doit pas bloquer par erreur
+                reasons.append(f"{label}_unavailable")
+                logger.debug("gate %s erreur: %s", label, e)
+        return reasons, blocked
 
     # ------------------------------------------------------------------
     def evaluate_spread(
@@ -101,7 +129,7 @@ class RiskEngine:
             reasons.append("positions_ok")
 
         # Gate 3 : exposition par actif
-        symbol = spread.signal.symbol
+        symbol = spread.underlying
         existing_asset = sum(
             p.max_risk for p in portfolio.positions if p.symbol == symbol
         )
@@ -146,6 +174,11 @@ class RiskEngine:
             blocked.append(f"position_size: ${spread.max_risk:.0f} trop grande")
         else:
             reasons.append("position_size_ok")
+
+        # Gates externes (vol_danger, avoid_sell — fournies par les agents)
+        extra_reasons, extra_blocked = self._run_extra_checks(spread)
+        reasons.extend(extra_reasons)
+        blocked.extend(extra_blocked)
 
         # Liquidation suggérée si perte totale trop profonde
         liquidation: list[str] = []

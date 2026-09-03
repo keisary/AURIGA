@@ -207,9 +207,12 @@ class OptionLeg:
 
 @dataclass
 class SpreadStrategy:
-    """Spread défini-risque complet."""
+    """Spread défini-risque complet.
 
-    signal: Signal
+    signal : Signal directionnel (None pour la vente de prime systématique —
+    dans ce cas `symbol` porte le sous-jacent).
+    """
+
     name: str  # "bull_call_spread" | "bear_put_spread" | "put_credit_spread" | "call_credit_spread"
     legs: list[OptionLeg]
     max_risk: float  # perte max $
@@ -217,11 +220,20 @@ class SpreadStrategy:
     debit_or_credit: float  # net premium
     dte: int  # days to expiration
     delta: float  # delta net approximatif
+    signal: Signal | None = None
+    symbol: str = ""  # sous-jacent (requis si signal is None)
     rationale: str = ""
+
+    @property
+    def underlying(self) -> str:
+        """Symbole du sous-jacent (signal ou champ direct)."""
+        if self.signal is not None:
+            return self.signal.symbol
+        return self.symbol
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "symbol": self.signal.symbol,
+            "symbol": self.underlying,
             "name": self.name,
             "legs": [vars(l) for l in self.legs],
             "max_risk": round(self.max_risk, 2),

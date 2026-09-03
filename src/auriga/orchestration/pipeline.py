@@ -326,16 +326,17 @@ def run_trading_mode(
         for spread in spreads:
             decision = risk.evaluate_spread(spread, portfolio)
             if not decision.allowed:
-                results.append({"symbol": spread.signal.symbol, "action": "BLOCKED", "reasons": decision.blocked_by})
+                results.append({"symbol": spread.underlying, "action": "BLOCKED", "reasons": decision.blocked_by})
                 continue
             qty = _qty_for_weight(spread, portfolio.equity)
             order = exec_client.submit_spread(spread, qty=qty)
-            results.append({"symbol": spread.signal.symbol, "action": order.status, "order_id": order.order_id, "message": order.message})
+            results.append({"symbol": spread.underlying, "action": order.status, "order_id": order.order_id, "message": order.message})
             if order.status not in ("error", "rejected"):
+                _sig = spread.signal
                 state.add_position(TrackedPosition(
-                    symbol=spread.signal.symbol,
-                    einher_id=spread.signal.einher.id,
-                    direction=spread.signal.einher.direction,
+                    symbol=spread.underlying,
+                    einher_id=_sig.einher.id if _sig is not None else f"prime_{spread.name}",
+                    direction=_sig.einher.direction if _sig is not None else "SELL_PRIME",
                     strategy_name=spread.name,
                     option_symbols=[l.option_symbol for l in spread.legs],
                     max_risk=spread.max_risk,
@@ -349,9 +350,10 @@ def run_trading_mode(
         portfolio = PortfolioState(equity=100000, cash=100000, buying_power=400000)
         for spread in spreads:
             decision = risk.evaluate_spread(spread, portfolio)
+            _sig = spread.signal
             results.append({
-                "symbol": spread.signal.symbol,
-                "direction": spread.signal.einher.direction,
+                "symbol": spread.underlying,
+                "direction": _sig.einher.direction if _sig is not None else "SELL_PRIME",
                 "spread": spread.name,
                 "max_risk": spread.max_risk,
                 "action": "OK" if decision.allowed else "BLOCKED",

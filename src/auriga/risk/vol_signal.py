@@ -250,3 +250,45 @@ class VolRiskEngine:
         if out is None:
             return False, None  # pas de signal → on n'invente pas un danger
         return out.vol_level == "danger", out
+
+    def is_danger_from_features(
+        self, symbol: str, feats_recent: pl.DataFrame
+    ) -> tuple[bool, VolRiskOutput | None]:
+        """Score le danger vol depuis des features DÉJÀ calculées (optimisation).
+
+        Évite de recalculer compute_features quand l'appelant les a déjà.
+        """
+        entry = self._models.get(symbol)
+        if entry is None:
+            if not self.load(symbol):
+                return False, None
+            entry = self._models.get(symbol)
+        if entry is None:
+            return False, None
+        model, auc = entry
+
+        try:
+            feature_names = [c for c in feats_recent.columns if c != "timestamp"]
+            X = feats_recent.select(feature_names).to_numpy().astype(np.float32)
+            if X.shape[0] < 50:
+                return False, None
+            proba = float(model.predict_proba(X[-1:, :])[0, 1])
+        except Exception as e:
+            logger.debug("is_danger_from_features %s: %s", symbol, e)
+            return False, None
+
+        if proba >= self.threshold:
+            level = "danger"
+        elif proba >= self.threshold * 0.6:
+            level = "elevee"
+        else:
+            level = "calme"
+
+        out = VolRiskOutput(
+            symbol=symbol,
+            danger_proba=round(proba, 4),
+            vol_level=level,
+            horizon_bars=self.horizon_bars,
+            model_auc=round(auc, 3),
+        )
+        return level == "danger", out
