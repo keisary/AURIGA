@@ -100,9 +100,12 @@ Phrase de clôture vidéo :
 ## 3. Ordre de travail demain matin (avant 15:00 UTC)
 
 ```text
-1.  Lire ce kit + vérifier le repo (déjà poussé : d474593 → 6420d25)
+1.  Lire ce kit + vérifier le repo (déjà poussé : d474593 → 6deff45)
 2.  Vérifier le dashboard : http://localhost:8501 (déjà lancé)
     → chip « PAPER CONNECTED » vert si clés OK ; bandeau rouge si déconnecté
+2b. Vérifier le narratif LLM : relancer `python -m auriga.orchestration.cli run`
+    et contrôler `"llm_ok": true` dans le résumé (clé OpenRouter validée le
+    03/09 ; un échec ponctuel = rate-limit, réessayer après 2-5 min)
 3.  Enregistrer la vidéo 60-90 s (script §4) — OBS ou Xbox Game Bar
 4.  Uploader cover + vidéo sur LabLab
 5.  Remplir les champs (§1) + coller le write-up ou son URL
