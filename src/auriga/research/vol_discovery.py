@@ -1,19 +1,11 @@
-"""AURIGA - Agent A2 : découverte de stratégies de VOLATILITÉ.
+"""AURIGA - LEGACY : découverte de stratégies de VOLATILITÉ (ex-Agent A2).
 
-Objectif : prédire si la volatilité va AUGMENTER ou DIMINUER sur l'horizon,
-via XGBoost régressant sur Y_vol = RV[t+H]/RV[t] − 1.
+⚠️ REMPLACÉ le 2026-09-03 : A2 est devenu un signal de risque (VolRiskEngine
+dans risk/vol_signal.py). Ce module est conservé pour référence/historique
+et pour les tests de recherche, mais il n'est PLUS appelé par le pipeline.
 
-Pourquoi (voir DESIGN_RATIONALE.md §7) :
-- La volatilité est persistante et prédictible (contrairement aux retours).
-- L'achat d'options PASSIF perd en moyenne (Ilmanen 2012) mais l'achat
-  CONDITIONNEL — quand le modèle détecte un choc de vol imminent — capte la
-  convexité sans saigner.
-
-Règles produites :
-- direction = "VOL_UP"   (score > seuil → la vol va monter → long straddle)
-- direction = "VOL_DOWN" (score < -seuil → la vol va baisser → vente vol/ne rien faire)
-
-Le champ `extra["agent"] = "vol"` distingue ces Einhers des directionnels.
+La mesure qui a motivé le changement : les straddles longs (achat de vol)
+sont globalement perdants (sharpe médian -2.64, conforme Ilmanen 2012).
 """
 from __future__ import annotations
 

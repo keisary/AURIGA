@@ -129,37 +129,43 @@ paper trading $100k).
 ## 5. Pourquoi l'architecture multi-agents
 
 **Décision** : AURIGA ne se limite pas à un moteur directionnel. Il combine
-**trois moteurs de recherche spécialisés** + un routeur de régime :
+**deux moteurs de stratégies** (direction + vente de prime) + **un signal de
+risque** (volatilité) + des règles d'arrêt (AVOID_SELL) :
 
 ```
-                    ┌─────────────────────┐
-                    │  Routeur de régime   │
-                    │  (méta-agent)        │
-                    └──────────┬──────────┘
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-        ┌──────────┐   ┌──────────┐   ┌──────────┐
-        │ A1       │   │ A2       │   │ A3       │
-        │ Direction│   │ Volatilité│  │ Vendeur  │
-        │ XGBoost  │   │ (achat)  │   │ prime    │
-        └──────────┘   └──────────┘   └──────────┘
+        ┌─────────────────────────────────────────────┐
+        │  SIGNAL DE RISQUE VOL (A2, ex-agent vol)     │
+        │  P(choc de vol) → gate vol_danger            │
+        └──────────────────┬──────────────────────────┘
+                           │ bloque si danger
+        ┌──────────────────┴──────────────────────────┐
+        │              RISK ENGINE (gates)             │
+        │  daily loss · expositions · positions · vol  │
+        └──────┬───────────────────────────┬───────────┘
+               ▼                           ▼
+        ┌──────────────┐            ┌──────────────────┐
+        │ A1 Direction │            │ A3 Vendeur prime │
+        │ (spreads     │            │ (credit spreads  │
+        │  débit)      │            │  filtrés AVOID   │
+        └──────────────┘            └──────────────────┘
 ```
+
+**Rôle d'A2 après transformation (2026-09-03)** : A2 ne génère plus de
+positions. Il produit un score de danger vol [0,1] par actif, consommé par le
+Risk Engine (gate vol_danger) et par le narratif LLM.
 
 **Justification** :
-- **Diversification des sources d'alpha** : la direction (momentum), la
-  volatilité (achat conditionnel), et la vente de prime (theta) sont des
-  sources de rendement *orthogonales*. Leur corrélation est faible.
-- **Robustesse** : si une source échoue cette semaine (ex: marché en range →
-  la direction perd), une autre compense (le vendeur de prime gagne en range).
-- **Crédibilité** : montrer 3 thèses distinctes = profondeur de recherche.
+- **Diversification des sources d'alpha** : la direction (momentum) et la
+  vente de prime (theta) sont des sources de rendement *orthogonales*. La
+  vente de prime gagne en range, la direction gagne en tendance.
+- **Gestion active du risque** : le signal de vol (A2) + les règles AVOID_SELL
+  (A3) protègent le portefeuille des queues de risque — le problème central
+  de la vente de prime.
+- **Robustesse** : si une source échoue cette semaine, l'autre compense.
+- **Crédibilité** : montrer des thèses distinctes + une mesure honnête de ce
+  qui ne marche pas (l'achat de vol) = profondeur de recherche rare au jury.
 - **Alignement avec les tracks du hackathon** : « Options Alpha Agents »
-  (A1+A2) et « Income & Portfolio Overlay Agents » (A3).
-
-**Sources** :
-- Ilmanen (2012) : la vente de prime et l'achat de vol sont les deux faces
-  d'une même prime de risque ; les combiner diversifie.
-- Taleb (réponse à Ilmanen) : l'achat d'options conditionnel (quand le risque
-  de queue est mal payé) est défendable — le ML permet ce timing.
+  (A1) et « Income & Portfolio Overlay Agents » (A3).
 
 ---
 
@@ -190,43 +196,40 @@ faible des marchés (bruit dominant). D'où les agents A2 et A3.
 
 ---
 
-## 7. Agent A2 — Volatilité directionnelle (achat conditionnel)
+## 7. Agent A2 — Signal de risque de volatilité (transformé, 2026-09-03)
 
-**Objectif** : prédire si la **volatilité va AUGMENTER ou DIMINUER** sur
-l'horizon. Quand la hausse de vol est prédite avec confiance → **ACHETER** de
-la volatilité (long straddle/strangle) ; quand la baisse est prédite → ne rien
-faire (ou laisser A3 vendre).
+**DÉCISION DE CONCEPTION MAJEURE** : après mesure sur données réelles,
+A2 ne produit PLUS de stratégies de trading autonomes. Il est transformé
+en **indicateur de risque** (VolSignal).
 
-**Label** : `Y_vol[t] = vol_réalisée[t+H] / vol_réalisée[t] − 1` (signé).
+**Mesure qui a motivé la décision** (AAPL 1H, backtest Black-Scholes
+corrigé avec annualisation + anti-tautologie) :
+- Les straddles longs (achat de vol) sont **globalement PERDANTS** :
+  sharpe médian −2.64 sur les règles avec >5 trades.
+- Ce résultat est conforme à la littérature : la prime de risque de vol
+  (IV > RV) rend l'achat de vol structurellement coûteux.
 
-**Features** : vol réalisée, GARCH, vol clustering, vol persistence, Hurst,
-entropie, skewness (les 36 features actuelles contiennent déjà ces signaux).
+**Nouveau rôle** : A2 prédit `P(choc de vol dans les H prochaines barres)`
+via un XGBClassifier sur le label `RV[t+H] > 1.5×RV[t]`. Ce signal est
+exploité par :
+1. Le **Risk Engine** : proba > seuil → gate `vol_danger` bloque les
+   nouvelles ventes de prime (A3). C'est le rôle principal.
+2. Le **vendeur de prime** : ne vendre QUE si vol_signal < seuil.
+3. Le **narratif LLM** : le risque de vol du jour est expliqué au jury.
 
-**Pourquoi l'achat conditionnel est défendable** :
-- L'achat PASSIF d'options perd en moyenne (Ilmanen 2012 : le long VIX a perdu
-  ~28%/an). Mais l'achat **conditionnel**, quand le modèle détecte un régime de
-  choc de vol imminent, transforme un actif à espérance négative en assurance
-  rentable.
-- Taleb : le vrai bénéfice du long-options est la **convexité** — il paie
-  quand tout le reste échoue. Un système qui anticipe ces régimes capte cette
-  convexité sans saigner en continu.
+**Mesure** : AUC = 0.746 sur AAPL (la vol est prédictible — conforme
+arXiv 2606.09478 : la vol est persistante, les retours non).
 
-**Expression options** : long straddle ou strangle (achat call + put même
-strike/expiration), ou strangle asymétrique selon le skew prédit.
-
-**Sources** :
-- Ilmanen (2012) + réponse de Taleb : le débat achat vs vente de vol.
-- « Volatility Forecasting and Return Prediction under Market Regimes »
-  (arXiv 2606.09478) : la vol est persistante et prédictible ; les signaux
-  conditionnés au régime deviennent robustes.
+**Source** : Ilmanen (2012) + réponse de Taleb + mesure directe sur nos
+données (DESIGN_RATIONALE, ce document).
 
 ---
 
 ## 8. Agent A3 — Vendeur de prime (vente gatée)
 
-**Objectif** : détecter les régimes où **vendre de la prime** (credit spreads)
-est favorable — typiquement vol élevée mais marché range-bound, pas de choc
-imminent.
+**Objectif** : vendre des credit spreads de façon SYSTÉMATIQUE quand le
+régime est calme, et S'ARRÊTER quand les signaux de risque (A2 vol_danger
++ règles AVOID_SELL) détectent une période dangereuse.
 
 **Pourquoi la vente de prime gagne en moyenne** :
 - Le « variance risk premium » : la vol implicite est structurellement
@@ -235,16 +238,19 @@ imminent.
 - Ilmanen (2012) : « La preuve empirique est sans ambiguïté : vendre de
   l'assurance et des tickets de loterie a généré des récompenses positives à
   long terme. »
+- **Mesure locale** : sur AAPL 1H, ~98.3% des périodes sont profitables à la
+  vente d'un short straddle — la base est de vendre.
 
 **Le rôle du ML (gating)** : la vente de prime subit des **pertes
-catastrophiques rares** (queues de risque). Le ML ne prédit PAS la direction ;
-il décide QUAND vendre (régime calme) et QUAND NE PAS vendre (avant earnings,
-crise, choc de vol). C'est un filtre de risque, pas un prédicteur de direction.
+catastrophiques rares** (~1.7% des périodes mesurées). Le ML n'apprend PAS
+à prédire la direction : il apprend à reconnaître les ~2% de périodes
+DANGEREUSES (règles AVOID_SELL) et à s'arrêter. C'est un filtre de risque.
 
-**Label** : 1 si un credit spread court sur [t, t+H] aurait été profitable
-(backtest Black-Scholes), 0 sinon.
+**Mesure** : 20 règles AVOID_SELL cohérentes sur AAPL (ex : max_dd récent
++ mfi surachat + kurtosis bas = zone dangereuse pour vendre).
 
-**Expression options** : put credit spread / call credit spread (défini-risque).
+**Expression options** : put credit spread / call credit spread (défini-risque),
+strike vendu ~3% OTM, protection ~5% plus loin.
 
 **Sources** :
 - Ilmanen (2012) — la prime de vente de vol.

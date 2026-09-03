@@ -198,6 +198,68 @@ def run_research_mode(
     portfolio = build_portfolio(all_admitted, config=default_portfolio_config())
     logger.info("Portefeuille: %d positions sélectionnées", len(portfolio.positions))
 
+    # 3b. Agents A2+A3 : modèles de RISQUE (vol_signal + règles AVOID_SELL)
+    # A2 est entraîné sur chaque actif → modèle de danger vol persisté.
+    # A3 découvre les règles AVOID_SELL (régimes où NE PAS vendre de prime).
+    from auriga.risk.vol_signal import VolRiskEngine
+
+    vol_engine = VolRiskEngine(horizon_bars=24)
+    n_vol_models = 0
+    for sym, ohlcv_sym in bars.items():
+        try:
+            feats_sym = compute_features(ohlcv_sym, "1H")
+            auc = vol_engine.train_and_save(sym, ohlcv_sym, feats_sym)
+            if auc > 0:
+                n_vol_models += 1
+        except Exception as e:
+            logger.debug("vol_signal %s: %s", sym, e)
+    logger.info("VolSignal (A2): %d modèles de danger vol entraînés", n_vol_models)
+
+    # Découverte A3 (AVOID_SELL) sur le premier horizon de la liste
+    avoid_all: list[Any] = []
+    try:
+        from auriga.research.prime_discovery import discover_sell_prime
+
+        hz_a3 = horizons_bars[0] if horizons_bars else 24
+        for sym, ohlcv_sym in bars.items():
+            try:
+                feats_sym = compute_features(ohlcv_sym, "1H")
+                feature_names = [c for c in feats_sym.columns if c != "timestamp"]
+                X = feats_sym.select(feature_names).to_numpy().astype("float32")
+                rules = discover_sell_prime(
+                    ohlcv_sym, feats_sym, X, feature_names, sym,
+                    hz_a3, f"{hz_a3}h",
+                    config=XGBConfig(n_estimators=100), max_paths=10,
+                )
+                avoid_all.extend(rules)
+            except Exception as e:
+                logger.debug("A3 %s: %s", sym, e)
+    except Exception as e:
+        logger.warning("A3 discovery indisponible: %s", e)
+
+    # Persister les règles AVOID_SELL
+    import json as _json
+
+    from auriga.types import condition_to_dict
+
+    if avoid_all:
+        avoid_path = output_dir / "avoid_sell.jsonl"
+        with open(avoid_path, "w", encoding="utf-8") as f:
+            for r in avoid_all:
+                f.write(_json.dumps({
+                    "id": r.id,
+                    "symbol": r.symbol,
+                    "direction": r.direction,
+                    "condition": condition_to_dict(r.condition),
+                    "amplitude": r.amplitude,
+                    "horizon_bars": r.horizon_bars,
+                    "source": r.source,
+                }, ensure_ascii=False) + "\n")
+        logger.info("A3: %d règles AVOID_SELL persistées -> %s", len(avoid_all), avoid_path)
+    else:
+        logger.info("A3: aucune règle AVOID_SELL (config actuelle)")
+
+
     # 4. Persistance
     portfolio_path = output_dir / "portfolio.jsonl"
     with open(portfolio_path, "w", encoding="utf-8") as f:
@@ -294,26 +356,81 @@ def run_trading_mode(
     if dry_run:
         logger.info("DRY RUN: pas d'ordres soumis")
 
-    # 2. Prix spot actuels
+    # 2. Prix spot + features récentes (une seule passe)
     md = get_market_data_client()
     spots: dict[str, float] = {}
+    recent_bars: dict[str, pl.DataFrame] = {}
+    recent_feats: dict[str, pl.DataFrame] = {}
     for sym in universe["symbols"]:
         try:
-            recent = md.get_recent_bars(sym, "1H", n=5)
-            if recent.height > 0:
-                spots[sym] = float(recent["close"][-1])
+            bars = md.get_recent_bars(sym, "1H", n=300)
+            if bars.height >= 60:
+                recent_bars[sym] = bars
+                spots[sym] = float(bars["close"][-1])
+                recent_feats[sym] = compute_features(bars, "1H")
         except Exception:
             pass
     state.save_spots(spots)
-    logger.info("Spots récupérés: %d actifs", len(spots))
+    logger.info("Spots + features récupérés: %d actifs", len(spots))
 
-    # 3. Vérifier les signaux actuels des stratégies du portefeuille
-    signals = _check_current_signals(alloc, spots, md)
-    logger.info("Signaux actuels déclenchés: %d", len(signals))
+    # 3. Signaux actuels des stratégies A1 (portefeuille directionnel)
+    signals = _check_current_signals(alloc, spots, recent_feats)
+    logger.info("Signaux A1 déclenchés: %d", len(signals))
 
-    # 4. Construire les spreads
-    spreads = build_spreads_for_signals(signals, market_data_client=md)
-    logger.info("Spreads construits: %d", len(spreads))
+    # 4. Construire les spreads directionnels A1
+    spreads_a1 = build_spreads_for_signals(signals, market_data_client=md)
+    logger.info("Spreads A1 construits: %d", len(spreads_a1))
+
+    # 5. Vente de prime A3 (credit spreads systématiques) + filtres risque
+    risk_events: list[dict] = []
+    spreads_prime: list[Any] = []
+    prime_enabled = cfg.orchestration.get("enable_prime_selling", True)
+    if prime_enabled and not cfg.raw.get("prime", {}).get("disabled", False):
+        from auriga.research.prime_seller import (
+            AvoidSellFilter,
+            PrimeSellerConfig,
+            filter_danger,
+            select_prime_candidates,
+        )
+        from auriga.risk.vol_signal import VolRiskEngine
+
+        prime_cfg = PrimeSellerConfig(
+            max_credit_spreads_per_cycle=int(cfg.raw.get("prime", {}).get(
+                "max_per_cycle", 8)),
+        )
+        # Charger les chaînes d'options pour la vente
+        chains: dict[str, pl.DataFrame] = {}
+        from auriga.data.cache import load_cached_chain
+
+        for sym in universe["symbols"]:
+            ch = load_cached_chain(sym)
+            if ch is not None and ch.height > 0:
+                chains[sym] = ch
+
+        # Charger les règles AVOID_SELL (modèles entraînés en recherche)
+        avoid_rules = _load_avoid_sell_rules()
+        avoid_filter = AvoidSellFilter(avoid_rules)
+
+        # VolRiskEngine : entraîne/charge les modèles de danger vol
+        vol_engine = VolRiskEngine(horizon_bars=24)
+        for sym in universe["symbols"]:
+            if recent_bars.get(sym) is not None:
+                vol_engine.load(sym)
+
+        # Sélectionner les credit spreads candidats
+        candidates = select_prime_candidates(
+            list(recent_feats.keys()), spots, chains, prime_cfg
+        )
+        # Filtrer par danger (vol + AVOID_SELL)
+        spreads_prime, risk_events = filter_danger(
+            candidates, vol_engine, recent_feats, avoid_filter
+        )
+        logger.info("Credit spreads A3: %d candidats -> %d autorisés après filtres",
+                    len(candidates), len(spreads_prime))
+
+    spreads = spreads_a1 + spreads_prime
+    logger.info("Spreads totaux à exécuter: %d (A1=%d, A3=%d)",
+                len(spreads), len(spreads_a1), len(spreads_prime))
 
     # 5. Risk gates + exécution
     exec_client = None
@@ -388,9 +505,16 @@ def run_trading_mode(
     return summary
 
 
-def _check_current_signals(alloc: Allocation, spots: dict[str, float], md) -> list:
+def _check_current_signals(
+    alloc: Allocation,
+    spots: dict[str, float],
+    recent_feats: dict[str, pl.DataFrame] | None = None,
+) -> list:
     """Vérifie si les stratégies du portefeuille se déclenchent sur les
-    dernières barres (évaluation de la condition sur les features récentes)."""
+    dernières barres (évaluation de la condition sur les features récentes).
+
+    recent_feats : features déjà calculées (optimisation — évite un 2e fetch).
+    """
     from auriga.types import Signal
 
     signals = []
@@ -399,10 +523,20 @@ def _check_current_signals(alloc: Allocation, spots: dict[str, float], md) -> li
         if sym not in spots or sym == "POOL":
             continue
         try:
-            recent = md.get_recent_bars(sym, "1H", n=300)
-            if recent.height < 50:
-                continue
-            feats = compute_features(recent, "1H")
+            if recent_feats is not None and sym in recent_feats:
+                feats = recent_feats[sym]
+            else:
+                # Fallback si les features ne sont pas fournies (mode legacy)
+                from auriga.data.market_data import get_market_data_client
+
+                md = get_market_data_client()
+                recent = md.get_recent_bars(sym, "1H", n=300)
+                if recent.height < 50:
+                    continue
+                from auriga.features.engine import compute_features
+
+                feats = compute_features(recent, "1H")
+
             from auriga.research.condition_tree import evaluate_ast_on_array
 
             feature_names = [c for c in feats.columns if c != "timestamp"]
@@ -416,6 +550,54 @@ def _check_current_signals(alloc: Allocation, spots: dict[str, float], md) -> li
         except Exception as e:
             logger.debug("Signal %s %s échec: %s", sym, pos.einher.id, e)
     return signals
+
+
+def _load_avoid_sell_rules() -> list:
+    """Charge les règles AVOID_SELL (Agent A3) depuis les fichiers de recherche.
+
+    Cherche dans outputs/research/ les candidats avec direction=AVOID_SELL.
+    """
+    import json
+
+    from auriga.types import Einher, condition_from_dict
+
+    rules: list = []
+    search_dir = Path("outputs/research")
+    if not search_dir.exists():
+        return rules
+
+    for f in sorted(search_dir.glob("avoid_sell_*.jsonl")) + sorted(search_dir.glob("candidates_*.jsonl")):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        d = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if d.get("direction") != "AVOID_SELL":
+                        continue
+                    try:
+                        rules.append(Einher(
+                            id=d["id"],
+                            condition=condition_from_dict(d["condition"]),
+                            direction="AVOID_SELL",
+                            amplitude=float(d.get("amplitude", 0)),
+                            symbol=d.get("symbol", "POOL"),
+                            timeframe=d.get("timeframe", "1H"),
+                            horizon_bars=int(d.get("horizon_bars", 24)),
+                            source=d.get("source", "xgboost:prime"),
+                        ))
+                    except (KeyError, TypeError):
+                        continue
+        except Exception:
+            continue
+
+    if rules:
+        logger.info("Règles AVOID_SELL chargées: %d (fichiers de recherche)", len(rules))
+    return rules
 
 
 def _qty_for_weight(spread, equity: float, max_risk_usd: float = 2500) -> int:

@@ -149,14 +149,24 @@ def select_expiry(chain: pl.DataFrame, min_dte: int = 14, max_dte: int = 42) -> 
     """Sélectionne l'expiration cible dans la chaîne (DTE 14-42 par défaut)."""
     from auriga.options.occ import days_to_expiry
 
-    expiries = sorted(chain["expiry"].unique().to_list())
+    # Filtrer les expiries invalides/vides (robustesse)
+    expiries = sorted(
+        e for e in chain["expiry"].unique().to_list()
+        if isinstance(e, str) and len(e) == 10 and e[4] == "-"
+    )
     for exp in expiries:
-        dte = days_to_expiry(exp)
+        try:
+            dte = days_to_expiry(exp)
+        except Exception:
+            continue
         if min_dte <= dte <= max_dte:
             return exp
     # Fallback : la plus proche au-delà de min_dte
     for exp in expiries:
-        dte = days_to_expiry(exp)
+        try:
+            dte = days_to_expiry(exp)
+        except Exception:
+            continue
         if dte >= min_dte:
             return exp
     return expiries[0] if expiries else None
