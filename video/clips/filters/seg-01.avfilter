@@ -1,0 +1,1 @@
+[0:v]scale=1920:1080,zoompan=z='1.0+0.10*on/(d-1)':d=316:s=1280x720:fps=30,format=yuv420p[v]
